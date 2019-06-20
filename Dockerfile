@@ -11,16 +11,16 @@ RUN yum install -y make git
 ENV GOPATH /go
 ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
 
-WORKDIR /go/src/sigs.k8s.io/kubefed
+COPY . /go/src/github.com/openshift/kubefed/
+
+WORKDIR /go/src/github.com/openshift/kubefed
+
+RUN find . -name "*.go" -exec sed -i -r "s/sigs.k8s.io\/kubefed/github.com\/openshift\/kubefed/g"  {} \;
+
+RUN sed -i "s/sigs.k8s.io/github.com\/openshift/g" Makefile 
 
 
-COPY Makefile Makefile
-COPY pkg pkg
-COPY cmd cmd
-COPY test test
-COPY vendor vendor
-
-RUN [ -z "$SOURCE_GIT_COMMIT" ] && DOCKER_BUILD="/bin/sh -c " make hyperfed || DOCKER_BUILD="/bin/sh -c " GIT_VERSION="$BUILD_VERSION" GIT_TAG="$SOURCE_GIT_TAG" GIT_HASH="$SOURCE_GIT_COMMIT" make hyperfed
+RUN DOCKER_BUILD="/bin/sh -c " make hyperfed
 
 # build stage 2:
 FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
@@ -28,26 +28,14 @@ FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
 ENV USER_ID=1001
 
 # copy in binaries
-RUN mkdir -p /hyperfed
-RUN groupadd -r hyperfed
-RUN useradd -g hyperfed -u $USER_ID hyperfed
-
-WORKDIR /hyperfed/
-
-# image builder is treating wild-carded source of the COPY command as a list
-# and therefore treating the target as a dir. this gets us to having a single file
-# called hyperfed in hyperfed directory.
-
-COPY --from=builder /go/src/sigs.k8s.io/kubefed/bin/hyperfed-* /hyperfed/
-RUN mv /hyperfed/hyperfed-* /hyperfed/hyperfed
+WORKDIR /root/
+COPY --from=builder /go/src/github.com/openshift/kubefed/bin/hyperfed-linux /root/hyperfed
 RUN ln -s hyperfed controller-manager && ln -s hyperfed kubefedctl &&  ln -s hyperfed webhook
 
-RUN chown -R hyperfed:hyperfed /hyperfed
-
 # user directive - this image does not require root
-USER hyperfed
+USER ${USER_ID}
 
-ENTRYPOINT ["/hyperfed/controller-manager"]
+ENTRYPOINT ["/root/controller-manager"]
 
 # apply labels to final image
 LABEL io.k8s.display-name="OpenShift KubeFed" \
