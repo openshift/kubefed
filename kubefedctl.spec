@@ -56,6 +56,7 @@ License:        ASL 2.0
 URL:            https://github.com/openshift/kubefed
 
 Source0:        https://%{import_path}/archive/%{commit}/kubefed-%{version}.tar.gz
+BuildRequires:  git
 BuildRequires:  golang >= %{golang_version}
 Provides:       kubefedctl
 # If go_arches not defined fall through to implicit golang archs
