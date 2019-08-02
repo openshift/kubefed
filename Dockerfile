@@ -20,7 +20,7 @@ COPY cmd cmd
 COPY test test
 COPY vendor vendor
 
-RUN DOCKER_BUILD="/bin/sh -c " make hyperfed
+RUN DOCKER_BUILD="" make hyperfed
 
 # build stage 2:
 FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
