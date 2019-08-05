@@ -75,10 +75,10 @@ GOPATH=$RPM_BUILD_DIR/go
 rm -rf $GOPATH
 mkdir -p $GOPATH/src/sigs.k8s.io/kubefed
 cd $RPM_BUILD_DIR
-rm -rf kubefed-client-%{version}
-tar -xzmf %{_sourcedir}/kubefed-client-%{version}.tar.gz
-cd kubefed-client-%{version}
-DIR=$RPM_BUILD_DIR/kubefed-client-%{version}
+rm -rf kubefed-client-git*
+tar -xzmf %{_sourcedir}/kubefed-client-git*.tar.gz
+cd kubefed-client-git*
+DIR=$RPM_BUILD_DIR/kubefed-client-git*
 mv $DIR/*  $GOPATH/src/sigs.k8s.io/kubefed/
 ln -s $GOPATH/src/sigs.k8s.io/kubefed/kubefed $DIR
 
