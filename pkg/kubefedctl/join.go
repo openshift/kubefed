@@ -165,7 +165,8 @@ func (j *joinFederation) Complete(args []string) error {
 
 // Run is the implementation of the `join` command.
 func (j *joinFederation) Run(cmdOut io.Writer, config util.FedConfig) error {
-	hostConfig, err := config.HostConfig(j.HostClusterContext, j.Kubeconfig)
+	hostClientConfig := config.GetClientConfig(j.HostClusterContext, j.Kubeconfig)
+	hostConfig, err := hostClientConfig.ClientConfig()
 	if err != nil {
 		// TODO(font): Return new error with this same text so it can be output
 		// by caller.
@@ -182,6 +183,16 @@ func (j *joinFederation) Run(cmdOut io.Writer, config util.FedConfig) error {
 	if err != nil {
 		klog.V(2).Infof("Failed to get joining cluster config: %v", err)
 		return err
+	}
+
+	// Set HostClusterContext as current context in kube config if it is not set
+	if j.HostClusterContext == "" {
+		rawConfig, err := hostClientConfig.RawConfig()
+		if err != nil {
+			klog.V(2).Infof("Failed to get current context in host client config")
+			return err
+		}
+		j.HostClusterContext = rawConfig.CurrentContext
 	}
 
 	hostClusterName := j.HostClusterContext
@@ -247,8 +258,13 @@ func JoinCluster(hostConfig, clusterConfig *rest.Config, kubefedNamespace,
 
 	klog.V(2).Info("Creating federated cluster resource")
 
+	var disabledTLSValidations []fedv1b1.TLSValidation
+	if clusterConfig.TLSClientConfig.Insecure {
+		disabledTLSValidations = append(disabledTLSValidations, fedv1b1.TLSAll)
+	}
+
 	_, err = createKubeFedCluster(client, joiningClusterName, clusterConfig.Host,
-		secret.Name, kubefedNamespace, caBundle, dryRun, errorOnExisting)
+		secret.Name, kubefedNamespace, caBundle, disabledTLSValidations, dryRun, errorOnExisting)
 	if err != nil {
 		klog.V(2).Infof("Failed to create federated cluster resource: %v", err)
 		return err
@@ -283,7 +299,8 @@ func performPreflightChecks(clusterClientset kubeclient.Interface, name, hostClu
 // createKubeFedCluster creates a federated cluster resource that associates
 // the cluster and secret.
 func createKubeFedCluster(client genericclient.Client, joiningClusterName, apiEndpoint,
-	secretName, kubefedNamespace string, caBundle []byte, dryRun, errorOnExisting bool) (*fedv1b1.KubeFedCluster, error) {
+	secretName, kubefedNamespace string, caBundle []byte, disabledTLSValidations []fedv1b1.TLSValidation,
+	dryRun, errorOnExisting bool) (*fedv1b1.KubeFedCluster, error) {
 	fedCluster := &fedv1b1.KubeFedCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: kubefedNamespace,
@@ -295,6 +312,7 @@ func createKubeFedCluster(client genericclient.Client, joiningClusterName, apiEn
 			SecretRef: fedv1b1.LocalSecretReference{
 				Name: secretName,
 			},
+			DisabledTLSValidations: disabledTLSValidations,
 		},
 	}
 

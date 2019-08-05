@@ -16,11 +16,11 @@ spec:
       labels:
         kubefed-control-plane: controller-manager
     spec:
+      securityContext:
+        runAsUser: 1001
       serviceAccountName: kubefed-controller
       containers:
-      - args:
-        - --kubefed-namespace=$(KUBEFED_NAMESPACE)
-        command:
+      - command:
         - /hyperfed/controller-manager
         image: "{{ .Values.repository }}/{{ .Values.image }}:{{ .Values.tag }}"
         imagePullPolicy: "{{ .Values.imagePullPolicy }}"
@@ -36,11 +36,6 @@ spec:
 {{- if .Values.resources }}
 {{ toYaml .Values.resources | indent 12 }}
 {{- end }}
-        env:
-        - name: KUBEFED_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
       terminationGracePeriodSeconds: 10
 ---
 apiVersion: apps/v1
@@ -60,6 +55,8 @@ spec:
       labels:
         kubefed-admission-webhook: "true"
     spec:
+      securityContext:
+        runAsUser: 1001
       serviceAccountName: kubefed-admission-webhook
       containers:
       - name: admission-webhook

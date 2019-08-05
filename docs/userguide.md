@@ -7,10 +7,7 @@
   - [Deployment Image](#deployment-image)
   - [Create Clusters](#create-clusters)
   - [Helm Chart Deployment](#helm-chart-deployment)
-  - [Operations](#operations)
-    - [Join Clusters](#join-clusters)
-    - [Checking status of joined clusters](#checking-status-of-joined-clusters)
-    - [Unjoining clusters](#unjoining-clusters)
+  - [Cluster Registration](#cluster-registration)
   - [Federated API types](#federated-api-types)
     - [Enabling federation of an API type](#enabling-federation-of-an-api-type)
     - [Verifying API type is installed on all member clusters](#verifying-api-type-is-installed-on-all-member-clusters)
@@ -30,6 +27,8 @@
     - [Checking resources status](#checking-resources-status)
     - [Updating FederatedNamespace placement](#updating-federatednamespace-placement)
     - [Cleaning up](#cleaning-up)
+  - [Overrides](#overrides)
+    - [Overriding retained fields](#overriding-retained-fields)
   - [Using Cluster Selector](#using-cluster-selector)
     - [Neither `spec.placement.clusters` nor `spec.placement.clusterSelector` is provided](#neither-specplacementclusters-nor-specplacementclusterselector-is-provided)
     - [Both `spec.placement.clusters` and `spec.placement.clusterSelector` are provided](#both-specplacementclusters-and-specplacementclusterselector-are-provided)
@@ -40,7 +39,7 @@
     - [Deployment Cleanup](#deployment-cleanup)
   - [Namespace-scoped control plane](#namespace-scoped-control-plane)
     - [Helm Configuration](#helm-configuration)
-    - [Joining additional clusters](#joining-additional-clusters)
+    - [Cluster Registration](#cluster-registration-1)
   - [Local Value Retention](#local-value-retention)
     - [Scalable](#scalable)
     - [ServiceAccount](#serviceaccount)
@@ -70,10 +69,13 @@ For information about installing KubeFed, see the [installation documentation](.
 
 `kubefedctl` is the KubeFed command line utility. You can download
 the latest binary from the [release page](https://github.com/kubernetes-sigs/kubefed/releases).
+
 ```bash
-VERSION=<latest-version>
-curl -LO https://github.com/kubernetes-sigs/kubefed/releases/download/${VERSION}/kubefedctl.tgz
-tar -zxvf kubefedctl.tgz
+VERSION=<latest-version, e.g. 0.1.0-rc3>
+OS=<darwin/linux>
+ARCH=amd64
+curl -LO https://github.com/kubernetes-sigs/kubefed/releases/download/v${VERSION}/kubefedctl-${VERSION}-${OS}-${ARCH}.tgz
+tar -zxvf kubefedctl-*.tgz
 chmod u+x kubefedctl
 sudo mv kubefedctl /usr/local/bin/ # make sure the location is in the PATH
 ```
@@ -114,51 +116,10 @@ kubectl config use-context cluster1
 You can refer to [helm chart installation guide](https://github.com/kubernetes-sigs/kubefed/blob/master/charts/kubefed/README.md)
 to install and uninstall a KubeFed control plane.
 
-### Fix Cluster Registry meta (Optional)
-Cluster registry meta-data address need to be fixed if you are running hyperkit docker under `Darwin`. Run following script to fix this.
-Specify the clusters you need to be fixed, Comma seperated.
-```bash
-./scripts/fix-joined-kind-clusters.sh cluster1,cluster2
-``` 
+## Cluster Registration
 
-## Operations
-
-### Join Clusters
-
-You can use the `kubefedctl` tool to join clusters as follows.
-
-```bash
-kubefedctl join cluster1 --cluster-context cluster1 \
-    --host-cluster-context cluster1 --v=2
-kubefedctl join cluster2 --cluster-context cluster2 \
-    --host-cluster-context cluster1 --v=2
-```
-
-Repeat this step to join any additional clusters.
-
-**NOTE:** `cluster-context` will default to use the joining cluster name if not
-specified.
-
-### Checking status of joined clusters
-
-Check the status of the joined clusters by using the following command.
-
-```bash
-kubectl -n kube-federation-system get kubefedclusters
-
-NAME       READY   AGE
-cluster1   True    1m
-cluster2   True    1m
-
-```
-### Unjoining clusters
-
-You can unjoin clusters using `kubefedctl` tool as follows.
-
-```bash
-kubefedctl unjoin cluster2 --cluster-context cluster2 --host-cluster-context cluster1 --v=2
-```
-Repeat this step to unjoin any additional clusters.
+You can join, unjoin and check the status of clusters using the `kubefedctl` command.
+See the [Cluster Registration documentation](./cluster-registration.md) for more information.
 
 ## Federated API types
 
@@ -175,7 +136,8 @@ kubefedctl enable <target kubernetes API type>
 ```
 
 The `<target kubernetes API type>` can be any of the following
--  the Kind (e.g. `Deployment`)
+
+- the Kind (e.g. `Deployment`)
 - plural name (e.g. `deployments`)
 - group-qualified plural name (e.g `deployment.apps`), or
 - short name (e.g. `deploy`)
@@ -253,10 +215,10 @@ propagation to that cluster.
 
 When `kubefedctl enable` is used to enable types whose plural names (e.g. **deployments**.example.com
 and **deployments**.apps) match, the crd name of the generated federated type would also match (e.g.
-**deployments**.types.kubefed.k8s.io).
+**deployments**.types.kubefed.io).
 
 `kubefedctl enable --federated-group string` specifies the name of the API
-group to use for the generated federated type. It is `types.kubefed.k8s.io` by
+group to use for the generated federated type. It is `types.kubefed.io` by
 default. If a non-default group is used to enable federation of a type, the
 RBAC permissions for the KubeFed controller manager will need to be updated to
 include permissions for the new group.
@@ -328,7 +290,7 @@ kubefedctl federate <target kubernetes API type> <target resource> [flags]
 ```
 
 If the flag `--namespace` is additionally not specified, the `<target resource>` will be
-searched for in the namespace `default`. Please take note that `--namespace` flag is of no
+searched for in the namespace according to the client kubeconfig context. Please take note that `--namespace` flag is of no
 meaning when federating a `namespace` itself and is discarded even if specified.
 Please check the next section for more details about [federating a namespace](#federate-a-namespace).
 
@@ -346,7 +308,7 @@ If `--output=yaml` is specified, and the target type is not yet enabled for fede
 `kubefedctl federate` will assume the default form of the federated type in generating the
 federated resource.  This may not be compatible with a kubefed control plane that has enabled
 a federated type in a non-default way (e.g. the group of the federated type has been set to
-something other than `types.kubefed.k8s.io`).
+something other than `types.kubefed.io`).
 
 ### Federate a namespace with contents
 `kubefedctl federate` can also be used to federate a target namespace and its contained resources
@@ -365,8 +327,8 @@ kubefedctl federate namespace my-namespace --contents --skip-api-resources "conf
 ### Optionally enable type while federating a resource
 `kubefedctl federate` allows optionally enabling the given `<target kubernetes API type>` before
 federating the resource by supplying the `--enable-type flag`. This will enable federation of the
-target type if it is not already enabled. Its recommended to use
-[`kubefectl enable`](#enabling-federation-of-an-api-type) beforehand if the intention is to
+target type if it is not already enabled. It's recommended to use
+[`kubefedctl enable`](#enabling-federation-of-an-api-type) beforehand if the intention is to
 specify non default type configuration values.
 
 ***Example:***
@@ -399,7 +361,7 @@ clusters, propagation status will be written to the resource as per
 the following example:
 
 ```yaml
-apiVersion: types.kubefed.k8s.io/v1beta1
+apiVersion: types.kubefed.io/v1beta1
 kind: FederatedNamespace
 metadata:
   name: myns
@@ -436,6 +398,7 @@ one of the following values:
 | CheckClusters          | One or more clusters is not in the desired state. |
 | ClusterRetrievalFailed | An error prevented retrieval of member clusters. |
 | ComputePlacementFailed | An error prevented computation of placement. |
+| NamespaceNotFederated  | The containing namespace is not federated. |
 
 For reasons other than `CheckClusters`, an event will be logged with
 the same reason and can be examined for more detail:
@@ -446,6 +409,9 @@ kubectl describe federatednamespace myns -n myns | grep ComputePlacementFailed
 Warning  ComputePlacementFailed  5m   federatednamespace-controller  Invalid selector <nil>
 ```
 
+If the reason is `NamespaceNotFederated`, the containing namespace can be
+federated by invoking `kubefedctl federate namespace <namespace name>`.
+
 #### Troubleshooting CheckClusters
 
 If the `Propagation` condition has status `False` and reason
@@ -455,15 +421,15 @@ example, namespace `myns` has been verified to exist in `cluster1`.
 The namespace should not exist in `cluster2`, but deletion has failed.
 
 ```yaml
-apiVersion: types.kubefed.k8s.io/v1beta1
+apiVersion: types.kubefed.io/v1beta1
 kind: FederatedNamespace
 metadata:
   name: myns
   namespace: myns
 spec:
   placement:
-    clusterNames:
-    - cluster1
+    clusters:
+    - name: cluster1
 status:
   conditions:
   - type: Propagation
@@ -492,6 +458,7 @@ The following table enumerates the possible values for cluster status:
 | Status                 | Description                  |
 |------------------------|------------------------------|
 | AlreadyExists          | The target resource already exists in the cluster, and cannot be adopted due to `adoptResources` being disabled. |
+| ApplyOverridesFailed   | An error occurred while attempting to apply overrides to the computed form of the target resource. |
 | CachedRetrievalFailed  | An error occurred when retrieving the cached target resource. |
 | ClientRetrievalFailed  | An error occurred while attempting to create an API client for the member cluster. |
 | ClusterNotReady        | The latest health check for the cluster did not succeed. |
@@ -511,27 +478,38 @@ The following table enumerates the possible values for cluster status:
 
 ## Deletion policy
 
-All federated resources reconciled by the sync controller have a finalizer (`kubefed.k8s.io/sync-controller`) added to their
+All federated resources reconciled by the sync controller have a finalizer (`kubefed.io/sync-controller`) added to their
 metadata. This finalizer will prevent deletion of a federated resource
 until the sync controller has a chance to perform pre-deletion
 cleanup.
 
 Pre-deletion cleanup of a federated resource includes removal of
 resources managed by the federated resource from member clusters. To
-ensure retention of managed resources, add `kubefed.k8s.io/orphan:
+ensure retention of managed resources, add `kubefed.io/orphan:
 true` as an annotation to the federated resource prior to deletion:
 
 Pre-deletion cleanup includes removal of
 resources managed by the federated resource from member clusters.
 
-To prevent removal of these managed resources, add `kubefed.k8s.io/orphan:
+To prevent removal of these managed resources, add `kubefed.io/orphan:
 true` as an annotation to the federated resource prior to deletion, as follows.
 
-```bash
-kubectl patch <federated type> <name> \
-    --type=merge -p '{"metadata": {"annotations": {"kubefed.k8s.io/orphan": "true"}}}'
+You can do it by
+```bash 
+kubefedctl orphaning-deletion enable <federated type> <name>
 ```
+You can also check the current `orphaning-deletion` status by:
+ ```bash 
+ kubefedctl orphaning-deletion status <federated type> <name>
+ ```
+And finally, if you want to return to the default deletion behavior, you can disable 
+the `orphaning-deletion` by:
+```bash 
+ kubefedctl orphaning-deletion disable <federated type> <name>
+ ```
 
+If the flag `--namespace` is additionally not specified, the federated resource will
+be searched for in the namespace according to the client kubeconfig context.
 If the sync controller for a given federated type is not able to reconcile a
 federated resource slated for deletion, a federated resource that still has the
 KubeFed finalizer will linger rather than being garbage collected. If
@@ -571,7 +549,7 @@ kubectl apply -R -f example/sample1
 ```
  **NOTE:** If you get the following error while creating a test resource
 ```
-unable to recognize "example/sample1/federated<type>.yaml": no matches for kind "Federated<type>" in version "types.kubefed.k8s.io/v1beta1",
+unable to recognize "example/sample1/federated<type>.yaml": no matches for kind "Federated<type>" in version "types.kubefed.io/v1beta1",
 
 ```
 then it indicates that a given type may need to be enabled with `kubefedctl enable <type>`
@@ -679,6 +657,69 @@ kubectl delete ns test-namespace
 ```
 > **NOTE:** Deleting the test namespace requires that the KubeFed controllers first perform the removal of managed resources from member clusters. This may take a few moments.
 
+## Overrides
+
+Overrides can be specified for any federated resource and allow varying
+resource content from the template on a per-cluster basis. Overrides are
+implemented via a subset of [jsonpatch](http://jsonpatch.com/), as follows:
+
+ - `op` defines the operation to perform (`add`, `remove` or `replace` are supported)
+   - `replace` replaces a value
+     - if not specified, `op` will default to `replace`
+   - `add` adds a value to an object or array
+   - `remove` removes a value from an object or array
+ - `path` specifies a valid location in the managed resource to target for modification
+   - `path` must start with a leading `/` and entries must be separated by `/`
+     - e.g. `/spec/replicas`
+   - indexed paths start at zero
+     - e.g. `/spec/template/spec/containers/0/image`
+ - `value` specifies the value to `add` or `replace`.
+   - `value` is ignored for `remove`
+
+For example:
+
+```yaml
+kind: FederatedDeployment
+...
+spec:
+  ...
+  overrides:
+  # Apply overrides to cluster1
+    - clusterName: cluster1
+      clusterOverrides:
+        # Set the replicas field to 5
+        - path: "/spec/replicas"
+          value: 5
+        # Set the image of the first container
+        - path: "/spec/template/spec/containers/0/image"
+          value: "nginx:1.17.0-alpine"
+        # Ensure the annotation "foo: bar" exists
+        - path: "/metadata/annotations"
+          op: "add"
+          value:
+            foo: bar
+        # Ensure an annotation with key "foo" does not exist
+        - path: "/metadata/annotations/foo"
+          op: "remove"
+```
+
+### Overriding retained fields
+
+When computing the form of a managed resource that should appear in a cluster
+registered with KubeFed, the following operations are executed in sequence:
+
+ - A new resource is computed from the template of the federated resource
+ - If an existing resource is present, the contents of fields subject to retention are preserved
+ - Overrides are applied
+ - The managed label is set
+
+This order of operations ensures that [fields subject to
+retention](#local-value-retention) can still be overridden (e.g. adding an
+entry to `metadata.annotations`). Care should be taken in applying overrides
+to retained fields that may be modified by controllers in member clusters or
+a managed resource may end up being continuously updated first by the
+controller in the member cluster and then by KubeFed.
+
 ## Using Cluster Selector
 
 In addition to specifying an explicit list of clusters that a resource should be propagated
@@ -732,7 +773,7 @@ scheduling have priority over manual definition of a cluster selector.
 ### `spec.placement.clusters` is not provided, `spec.placement.clusterSelector` is provided but empty
 
 In this case, `spec.placement.clusterSelector` will be ignored, since
-`spec.placement.clusterNames` is provided. This ensures that the results of runtime
+`spec.placement.clusters` is provided. This ensures that the results of runtime
 scheduling have priority over manual definition of a cluster selector.
 
 ```yaml
@@ -811,21 +852,10 @@ To deploy KubeFed in a namespaced configuration, set
 `global.scope` to `Namespaced` as per the Helm chart [install
 instructions](https://github.com/kubernetes-sigs/kubefed/blob/master/charts/kubefed/README.md#configuration).
 
-### Joining additional clusters
+### Cluster Registration
 
-Joining additional clusters to a namespaced control plane requires
-providing additional arguments to `kubefedctl join`:
-
-- `--kubefed-namespace=<namespace>` to ensure the cluster has been registered
-  with the KubeFed control plane running in the specified namespace
-
-To join `mycluster` when `KUBEFED_NAMESPACE=test-namespace` was used for deployment:
-
-```bash
-kubefedctl join mycluster --cluster-context mycluster \
-    --host-cluster-context mycluster --v=2 \
-    --kubefed-namespace=test-namespace
-```
+You can join, unjoin and check the status of clusters using the `kubefedctl` command.
+See the [Cluster Registration documentation](./cluster-registration.md) for more information.
 
 ## Local Value Retention
 
@@ -834,12 +864,14 @@ changes made to resources it manages in member clusters.  The
 exceptions appear in the following table.  Where retention is
 conditional, an explanation will be provided in a subsequent section.
 
-| Resource Type  | Fields                    | Retention   | Requirement                                                                  |
-|----------------|---------------------------|-------------|------------------------------------------------------------------------------|
-| All            | metadata.resourceVersion  | Always      | Updates require the most recent resourceVersion for concurrency control.     |
-| Scalable       | spec.replicas             | Conditional | The HPA controller may be managing the replica count of a scalable resource. |
-| Service        | spec.clusterIP,spec.ports | Always      | A controller may be managing these fields.                                   |
-| ServiceAccount | secrets                   | Conditional | A controller may be managing this field.                                     |
+| Resource Type  | Fields                    | Retention   | Requirement                                                                        |
+|----------------|---------------------------|-------------|------------------------------------------------------------------------------------|
+| All            | metadata.annotations      | Always      | The annotations field is intended to be managed by controllers in member clusters. |
+| All            | metadata.finalizers       | Always      | The finalizers field is intended to be managed by controllers in member clusters.  |
+| All            | metadata.resourceVersion  | Always      | Updates require the most recent resourceVersion for concurrency control.           |
+| Scalable       | spec.replicas             | Conditional | The HPA controller may be managing the replica count of a scalable resource.       |
+| Service        | spec.clusterIP,spec.ports | Always      | A controller may be managing these fields.                                         |
+| ServiceAccount | secrets                   | Conditional | A controller may be managing this field.                                           |
 
 ### Scalable
 
@@ -912,7 +944,7 @@ per cluster user preferences. If the per cluster preferences are absent, it
 distributes the `spec.totalReplicas` evenly among all clusters. It updates (or
 creates if missing) the same `namespace/name` for the
 `targetKind` with the replica values calculated, leveraging the sync controller
-to actually propagate the k8s resource to federated clusters. Its noteworthy that
+to actually propagate the k8s resource to federated clusters. It's noteworthy that
 if an RSP is present, the `spec.replicas` from the federated resource are unused.
 RSP also provides a further more useful feature using `spec.rebalance`. If this is
 set to `true`, the RSP controller monitors the replica pods for target replica
@@ -942,7 +974,7 @@ examples considers 3 federated clusters `A`, `B` and `C`.
 #### Distribute total replicas evenly in all available clusters
 
 ```yaml
-apiVersion: scheduling.kubefed.k8s.io/v1alpha1
+apiVersion: scheduling.kubefed.io/v1alpha1
 kind: ReplicaSchedulingPreference
 metadata:
   name: test-deployment
@@ -955,7 +987,7 @@ spec:
 or
 
 ```yaml
-apiVersion: scheduling.kubefed.k8s.io/v1alpha1
+apiVersion: scheduling.kubefed.io/v1alpha1
 kind: ReplicaSchedulingPreference
 metadata:
   name: test-deployment
@@ -973,7 +1005,7 @@ A, B and C get 3 replicas each.
 #### Distribute total replicas in weighted proportions
 
 ```yaml
-apiVersion: scheduling.kubefed.k8s.io/v1alpha1
+apiVersion: scheduling.kubefed.io/v1alpha1
 kind: ReplicaSchedulingPreference
 metadata:
   name: test-deployment
@@ -994,7 +1026,7 @@ any replica as missing weight preference is considered as weight=0.
 #### Distribute replicas in weighted proportions, also enforcing replica limits per cluster
 
 ```yaml
-apiVersion: scheduling.kubefed.k8s.io/v1alpha1
+apiVersion: scheduling.kubefed.io/v1alpha1
 kind: ReplicaSchedulingPreference
 metadata:
   name: test-deployment
@@ -1018,7 +1050,7 @@ A gets 4 and B get 5 as weighted distribution is capped by cluster A minReplicas
 #### Distribute replicas evenly in all clusters, however not more than 20 in C
 
 ```yaml
-apiVersion: scheduling.kubefed.k8s.io/v1alpha1
+apiVersion: scheduling.kubefed.io/v1alpha1
 kind: ReplicaSchedulingPreference
 metadata:
   name: test-deployment

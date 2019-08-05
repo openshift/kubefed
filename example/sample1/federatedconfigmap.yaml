@@ -1,4 +1,4 @@
-apiVersion: types.kubefed.k8s.io/v1beta1
+apiVersion: types.kubefed.io/v1beta1
 kind: FederatedConfigMap
 metadata:
   name: test-configmap
@@ -14,6 +14,6 @@ spec:
   overrides:
   - clusterName: cluster2
     clusterOverrides:
-    - path: data
+    - path: /data
       value:
         foo: bar

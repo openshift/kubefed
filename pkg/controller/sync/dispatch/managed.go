@@ -17,6 +17,7 @@ limitations under the License.
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -24,10 +25,12 @@ import (
 	"github.com/pkg/errors"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	pkgruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/kubefed/pkg/client/generic"
 	"sigs.k8s.io/kubefed/pkg/controller/sync/status"
 	"sigs.k8s.io/kubefed/pkg/controller/util"
 )
@@ -37,11 +40,14 @@ import (
 type FederatedResourceForDispatch interface {
 	TargetName() util.QualifiedName
 	TargetKind() string
+	TargetGVK() schema.GroupVersionKind
 	Object() *unstructured.Unstructured
 	VersionForCluster(clusterName string) (string, error)
 	ObjectForCluster(clusterName string) (*unstructured.Unstructured, error)
+	ApplyOverrides(obj *unstructured.Unstructured, clusterName string) error
 	RecordError(errorCode string, err error)
 	RecordEvent(reason, messageFmt string, args ...interface{})
+	IsNamespaceInHostCluster(clusterObj pkgruntime.Object) bool
 }
 
 // ManagedDispatcher dispatches operations to member clusters for resources
@@ -77,7 +83,7 @@ func NewManagedDispatcher(clientAccessor clientAccessorFunc, fedResource Federat
 		skipAdoptingResources: skipAdoptingResources,
 	}
 	d.dispatcher = newOperationDispatcher(clientAccessor, d)
-	d.unmanagedDispatcher = newUnmanagedDispatcher(d.dispatcher, d, fedResource.TargetKind(), fedResource.TargetName())
+	d.unmanagedDispatcher = newUnmanagedDispatcher(d.dispatcher, d, fedResource.TargetGVK(), fedResource.TargetName())
 	return d
 }
 
@@ -123,16 +129,22 @@ func (d *managedDispatcherImpl) Create(clusterName string) {
 
 	d.dispatcher.incrementOperationsInitiated()
 	const op = "create"
-	go d.dispatcher.clusterOperation(clusterName, op, func(client util.ResourceClient) util.ReconciliationStatus {
+	go d.dispatcher.clusterOperation(clusterName, op, func(client generic.Client) util.ReconciliationStatus {
 		d.recordEvent(clusterName, op, "Creating")
 
 		obj, err := d.fedResource.ObjectForCluster(clusterName)
 		if err != nil {
 			return d.recordOperationError(status.ComputeResourceFailed, clusterName, op, err)
 		}
-		createdObj, err := client.Resources(obj.GetNamespace()).Create(obj, metav1.CreateOptions{})
+
+		err = d.fedResource.ApplyOverrides(obj, clusterName)
+		if err != nil {
+			return d.recordOperationError(status.ApplyOverridesFailed, clusterName, op, err)
+		}
+
+		err = client.Create(context.Background(), obj)
 		if err == nil {
-			version := util.ObjectVersion(createdObj)
+			version := util.ObjectVersion(obj)
 			d.recordVersion(clusterName, version)
 			return util.StatusAllOK
 		}
@@ -144,20 +156,21 @@ func (d *managedDispatcherImpl) Create(clusterName string) {
 			return d.recordOperationError(status.CreationFailed, clusterName, op, err)
 		}
 
-		if d.skipAdoptingResources {
-			_ = d.recordOperationError(status.AlreadyExists, clusterName, op, errors.Errorf("Resource pre-exist in cluster"))
-			return util.StatusAllOK
-		}
-
 		// Attempt to update the existing resource to ensure that it
 		// is labeled as a managed resource.
-		clusterObj, err := client.Resources(obj.GetNamespace()).Get(obj.GetName(), metav1.GetOptions{})
+		err = client.Get(context.Background(), obj, obj.GetNamespace(), obj.GetName())
 		if err != nil {
 			wrappedErr := errors.Wrapf(err, "failed to retrieve object potentially requiring adoption")
 			return d.recordOperationError(status.RetrievalFailed, clusterName, op, wrappedErr)
 		}
+
+		if d.skipAdoptingResources && !d.fedResource.IsNamespaceInHostCluster(obj) {
+			_ = d.recordOperationError(status.AlreadyExists, clusterName, op, errors.Errorf("Resource pre-exist in cluster"))
+			return util.StatusAllOK
+		}
+
 		d.recordError(clusterName, op, errors.Errorf("An update will be attempted instead of a creation due to an existing resource"))
-		d.Update(clusterName, clusterObj)
+		d.Update(clusterName, obj)
 		return util.StatusAllOK
 	})
 }
@@ -167,7 +180,7 @@ func (d *managedDispatcherImpl) Update(clusterName string, clusterObj *unstructu
 
 	d.dispatcher.incrementOperationsInitiated()
 	const op = "update"
-	go d.dispatcher.clusterOperation(clusterName, op, func(client util.ResourceClient) util.ReconciliationStatus {
+	go d.dispatcher.clusterOperation(clusterName, op, func(client generic.Client) util.ReconciliationStatus {
 		obj, err := d.fedResource.ObjectForCluster(clusterName)
 		if err != nil {
 			return d.recordOperationError(status.ComputeResourceFailed, clusterName, op, err)
@@ -177,6 +190,11 @@ func (d *managedDispatcherImpl) Update(clusterName string, clusterObj *unstructu
 		if err != nil {
 			wrappedErr := errors.Wrapf(err, "failed to retain fields")
 			return d.recordOperationError(status.FieldRetentionFailed, clusterName, op, wrappedErr)
+		}
+
+		err = d.fedResource.ApplyOverrides(obj, clusterName)
+		if err != nil {
+			return d.recordOperationError(status.ApplyOverridesFailed, clusterName, op, err)
 		}
 
 		version, err := d.fedResource.VersionForCluster(clusterName)
@@ -191,11 +209,11 @@ func (d *managedDispatcherImpl) Update(clusterName string, clusterObj *unstructu
 		// Only record an event if the resource is not current
 		d.recordEvent(clusterName, op, "Updating")
 
-		updatedObj, err := client.Resources(obj.GetNamespace()).Update(obj, metav1.UpdateOptions{})
+		err = client.Update(context.Background(), obj)
 		if err != nil {
 			return d.recordOperationError(status.UpdateFailed, clusterName, op, err)
 		}
-		version = util.ObjectVersion(updatedObj)
+		version = util.ObjectVersion(obj)
 		d.recordVersion(clusterName, version)
 		return util.StatusAllOK
 	})

@@ -18,11 +18,18 @@ package util
 
 import (
 	"fmt"
+	"strings"
+
+	"github.com/pkg/errors"
 
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"sigs.k8s.io/kubefed/pkg/kubefedctl/options"
 )
+
+const FederatedKindPrefix = "Federated"
 
 // FedConfig provides a rest config based on the filesystem kubeconfig (via
 // pathOptions) and context in order to talk to the host kubernetes cluster
@@ -30,6 +37,7 @@ import (
 type FedConfig interface {
 	HostConfig(context, kubeconfigPath string) (*rest.Config, error)
 	ClusterConfig(context, kubeconfigPath string) (*rest.Config, error)
+	GetClientConfig(ontext, kubeconfigPath string) clientcmd.ClientConfig
 }
 
 // fedConfig implements the FedConfig interface.
@@ -47,7 +55,7 @@ func NewFedConfig(pathOptions *clientcmd.PathOptions) FedConfig {
 // HostConfig provides a rest config to talk to the host kubernetes cluster
 // based on the context and kubeconfig passed in.
 func (a *fedConfig) HostConfig(context, kubeconfigPath string) (*rest.Config, error) {
-	hostConfig := a.getClientConfig(context, kubeconfigPath)
+	hostConfig := a.GetClientConfig(context, kubeconfigPath)
 	hostClientConfig, err := hostConfig.ClientConfig()
 	if err != nil {
 		return nil, err
@@ -59,7 +67,7 @@ func (a *fedConfig) HostConfig(context, kubeconfigPath string) (*rest.Config, er
 // ClusterConfig provides a rest config to talk to the joining kubernetes
 // cluster based on the context and kubeconfig passed in.
 func (a *fedConfig) ClusterConfig(context, kubeconfigPath string) (*rest.Config, error) {
-	clusterConfig := a.getClientConfig(context, kubeconfigPath)
+	clusterConfig := a.GetClientConfig(context, kubeconfigPath)
 	clusterClientConfig, err := clusterConfig.ClientConfig()
 	if err != nil {
 		return nil, err
@@ -70,7 +78,7 @@ func (a *fedConfig) ClusterConfig(context, kubeconfigPath string) (*rest.Config,
 
 // getClientConfig is a helper method to create a client config from the
 // context and kubeconfig passed as arguments.
-func (a *fedConfig) getClientConfig(context, kubeconfigPath string) clientcmd.ClientConfig {
+func (a *fedConfig) GetClientConfig(context, kubeconfigPath string) clientcmd.ClientConfig {
 	loadingRules := *a.pathOptions.LoadingRules
 	loadingRules.Precedence = a.pathOptions.GetLoadingPrecedence()
 	loadingRules.ExplicitPath = kubeconfigPath
@@ -111,4 +119,23 @@ func RoleName(serviceAccountName string) string {
 // account to check the health of the cluster and list nodes.
 func HealthCheckRoleName(serviceAccountName, namespace string) string {
 	return fmt.Sprintf("kubefed-controller-manager:%s:healthcheck-%s", namespace, serviceAccountName)
+}
+
+// IsFederatedAPIResource checks if a resource with the given Kind and group is a Federated one
+func IsFederatedAPIResource(kind, group string) bool {
+	return strings.HasPrefix(kind, FederatedKindPrefix) && group == options.DefaultFederatedGroup
+}
+
+// GetNamespace returns namespace of the current context
+func GetNamespace(hostClusterContext string, kubeconfig string, config FedConfig) (string, error) {
+	ns, _, err := config.GetClientConfig(hostClusterContext, kubeconfig).Namespace()
+	if err != nil {
+		return "", errors.Wrapf(err, "Failed to get ClientConfig for host cluster context %q and kubeconfig %q",
+			hostClusterContext, kubeconfig)
+	}
+
+	if len(ns) == 0 {
+		ns = "default"
+	}
+	return ns, nil
 }

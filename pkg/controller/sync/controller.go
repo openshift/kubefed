@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -53,13 +54,7 @@ const (
 	// If this finalizer is present on a federated resource, the sync
 	// controller will have the opportunity to perform pre-deletion operations
 	// (like deleting managed resources from member clusters).
-	FinalizerSyncController = "kubefed.k8s.io/sync-controller"
-
-	// If this annotation is present on a federated resource, resources in the
-	// member clusters managed by the federated resource should be orphaned.
-	// If the annotation is not present (the default), resources in member
-	// clusters will be deleted before the federated resource is deleted.
-	OrphanManagedResources = "kubefed.k8s.io/orphan"
+	FinalizerSyncController = "kubefed.io/sync-controller"
 )
 
 // KubeFedSyncController synchronizes the state of federated resources
@@ -90,6 +85,8 @@ type KubeFedSyncController struct {
 	hostClusterClient genericclient.Client
 
 	skipAdoptingResources bool
+
+	limitedScope bool
 }
 
 // StartKubeFedSyncController starts a new sync controller for a type config
@@ -128,6 +125,7 @@ func newKubeFedSyncController(controllerConfig *util.ControllerConfig, typeConfi
 		typeConfig:              typeConfig,
 		hostClusterClient:       client,
 		skipAdoptingResources:   controllerConfig.SkipAdoptingResources,
+		limitedScope:            controllerConfig.LimitedScope(),
 	}
 
 	s.worker = util.NewReconcileWorker(s.reconcile, util.WorkerTiming{
@@ -249,11 +247,12 @@ func (s *KubeFedSyncController) reconcile(qualifiedName util.QualifiedName) util
 		return util.StatusError
 	}
 	if possibleOrphan {
-		targetKind := s.typeConfig.GetTargetType().Kind
-		klog.V(2).Infof("Ensuring the removal of the label %q from %s %q in member clusters.", util.ManagedByKubeFedLabelKey, targetKind, qualifiedName)
-		err = s.removeManagedLabel(targetKind, qualifiedName)
+		apiResource := s.typeConfig.GetTargetType()
+		gvk := apiResourceToGVK(&apiResource)
+		klog.V(2).Infof("Ensuring the removal of the label %q from %s %q in member clusters.", util.ManagedByKubeFedLabelKey, gvk.Kind, qualifiedName)
+		err = s.removeManagedLabel(gvk, qualifiedName)
 		if err != nil {
-			wrappedErr := errors.Wrapf(err, "failed to remove the label %q from %s %q in member clusters", util.ManagedByKubeFedLabelKey, targetKind, qualifiedName)
+			wrappedErr := errors.Wrapf(err, "failed to remove the label %q from %s %q in member clusters", util.ManagedByKubeFedLabelKey, gvk.Kind, qualifiedName)
 			runtime.HandleError(wrappedErr)
 			return util.StatusError
 		}
@@ -390,6 +389,17 @@ func (s *KubeFedSyncController) setPropagationStatus(fedResource FederatedResour
 	name := fedResource.FederatedName()
 	obj := fedResource.Object()
 
+	// Only a single reason for propagation failure is reported at any one time, so only report
+	// NamespaceNotFederated if no other explicit error has been indicated.
+	if reason == status.AggregateSuccess {
+		// For a cluster-scoped control plane, report when the containing namespace of a federated
+		// resource is not federated.  The KubeFed system namespace is implicitly federated in a
+		// namespace-scoped control plane.
+		if !s.limitedScope && fedResource.NamespaceNotFederated() {
+			reason = status.NamespaceNotFederated
+		}
+	}
+
 	// If the underlying resource has changed, attempt to retrieve and
 	// update it repeatedly.
 	err := wait.PollImmediate(1*time.Second, 5*time.Second, func() (bool, error) {
@@ -435,18 +445,17 @@ func (s *KubeFedSyncController) ensureDeletion(fedResource FederatedResource) ut
 		return util.StatusAllOK
 	}
 
-	annotations := obj.GetAnnotations()
-	orphanResources := annotations != nil && annotations[OrphanManagedResources] == "true"
-	if orphanResources {
-		klog.V(2).Infof("Found %q annotation on %s %q. Removing the finalizer.", OrphanManagedResources, kind, key)
+	if util.IsOrphaningEnabled(obj) {
+		klog.V(2).Infof("Found %q annotation on %s %q. Removing the finalizer.",
+			util.OrphanManagedResourcesAnnotation, kind, key)
 		err := s.removeFinalizer(fedResource)
 		if err != nil {
-			wrappedErr := errors.Wrapf(err, "failed to remove finalizer %q from %s %q", OrphanManagedResources, kind, key)
+			wrappedErr := errors.Wrapf(err, "failed to remove finalizer %q from %s %q", FinalizerSyncController, kind, key)
 			runtime.HandleError(wrappedErr)
 			return util.StatusError
 		}
 		klog.V(2).Infof("Initiating the removal of the label %q from resources previously managed by %s %q.", util.ManagedByKubeFedLabelKey, kind, key)
-		err = s.removeManagedLabel(fedResource.TargetKind(), fedResource.TargetName())
+		err = s.removeManagedLabel(fedResource.TargetGVK(), fedResource.TargetName())
 		if err != nil {
 			wrappedErr := errors.Wrapf(err, "failed to remove the label %q from all resources previously managed by %s %q", util.ManagedByKubeFedLabelKey, kind, key)
 			runtime.HandleError(wrappedErr)
@@ -470,8 +479,8 @@ func (s *KubeFedSyncController) ensureDeletion(fedResource FederatedResource) ut
 
 // removeManagedLabel attempts to remove the managed label from
 // resources with the given name in member clusters.
-func (s *KubeFedSyncController) removeManagedLabel(kind string, qualifiedName util.QualifiedName) error {
-	ok, err := s.handleDeletionInClusters(kind, qualifiedName, func(dispatcher dispatch.UnmanagedDispatcher, clusterName string, clusterObj *unstructured.Unstructured) {
+func (s *KubeFedSyncController) removeManagedLabel(gvk schema.GroupVersionKind, qualifiedName util.QualifiedName) error {
+	ok, err := s.handleDeletionInClusters(gvk, qualifiedName, func(dispatcher dispatch.UnmanagedDispatcher, clusterName string, clusterObj *unstructured.Unstructured) {
 		if clusterObj.GetDeletionTimestamp() != nil {
 			return
 		}
@@ -488,11 +497,11 @@ func (s *KubeFedSyncController) removeManagedLabel(kind string, qualifiedName ut
 }
 
 func (s *KubeFedSyncController) deleteFromClusters(fedResource FederatedResource) (bool, error) {
-	kind := fedResource.TargetKind()
+	gvk := fedResource.TargetGVK()
 	qualifiedName := fedResource.TargetName()
 
 	remainingClusters := []string{}
-	ok, err := s.handleDeletionInClusters(kind, qualifiedName, func(dispatcher dispatch.UnmanagedDispatcher, clusterName string, clusterObj *unstructured.Unstructured) {
+	ok, err := s.handleDeletionInClusters(gvk, qualifiedName, func(dispatcher dispatch.UnmanagedDispatcher, clusterName string, clusterObj *unstructured.Unstructured) {
 		// If the containing namespace of a FederatedNamespace is
 		// marked for deletion, it is impossible to require the
 		// removal of the namespace in advance of removal of the sync
@@ -550,7 +559,7 @@ func (s *KubeFedSyncController) ensureRemovedOrUnmanaged(fedResource FederatedRe
 		return errors.Wrap(err, "failed to get a list of clusters")
 	}
 
-	dispatcher := dispatch.NewCheckUnmanagedDispatcher(s.informer.GetClientForCluster, fedResource.TargetKind(), fedResource.TargetName())
+	dispatcher := dispatch.NewCheckUnmanagedDispatcher(s.informer.GetClientForCluster, fedResource.TargetGVK(), fedResource.TargetName())
 	unreadyClusters := []string{}
 	for _, cluster := range clusters {
 		if !util.IsClusterReady(&cluster.Status) {
@@ -574,7 +583,7 @@ func (s *KubeFedSyncController) ensureRemovedOrUnmanaged(fedResource FederatedRe
 
 // handleDeletionInClusters invokes the provided deletion handler for
 // each managed resource in member clusters.
-func (s *KubeFedSyncController) handleDeletionInClusters(kind string, qualifiedName util.QualifiedName,
+func (s *KubeFedSyncController) handleDeletionInClusters(gvk schema.GroupVersionKind, qualifiedName util.QualifiedName,
 	deletionFunc func(dispatcher dispatch.UnmanagedDispatcher, clusterName string, clusterObj *unstructured.Unstructured)) (bool, error) {
 
 	clusters, err := s.informer.GetClusters()
@@ -582,7 +591,7 @@ func (s *KubeFedSyncController) handleDeletionInClusters(kind string, qualifiedN
 		return false, errors.Wrap(err, "failed to get a list of clusters")
 	}
 
-	dispatcher := dispatch.NewUnmanagedDispatcher(s.informer.GetClientForCluster, kind, qualifiedName)
+	dispatcher := dispatch.NewUnmanagedDispatcher(s.informer.GetClientForCluster, gvk, qualifiedName)
 	key := qualifiedName.String()
 	retrievalFailureClusters := []string{}
 	unreadyClusters := []string{}
@@ -596,7 +605,7 @@ func (s *KubeFedSyncController) handleDeletionInClusters(kind string, qualifiedN
 
 		rawClusterObj, _, err := s.informer.GetTargetStore().GetByKey(clusterName, key)
 		if err != nil {
-			wrappedErr := errors.Wrapf(err, "failed to retrieve %s %q for cluster %q", kind, key, clusterName)
+			wrappedErr := errors.Wrapf(err, "failed to retrieve %s %q for cluster %q", gvk.Kind, key, clusterName)
 			runtime.HandleError(wrappedErr)
 			retrievalFailureClusters = append(retrievalFailureClusters, clusterName)
 			continue

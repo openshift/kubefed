@@ -21,9 +21,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/kubefed/cmd/controller-manager/app/leaderelection"
 	"sigs.k8s.io/kubefed/cmd/controller-manager/app/options"
 	corev1b1 "sigs.k8s.io/kubefed/pkg/apis/core/v1beta1"
+	"sigs.k8s.io/kubefed/pkg/apis/core/v1beta1/validation"
 	genericclient "sigs.k8s.io/kubefed/pkg/client/generic"
 	"sigs.k8s.io/kubefed/pkg/controller/dnsendpoint"
 	"sigs.k8s.io/kubefed/pkg/controller/federatedtypeconfig"
@@ -65,8 +67,8 @@ func NewControllerManagerCommand(stopChan <-chan struct{}) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "controller-manager",
 		Long: `The KubeFed controller manager runs a bunch of controllers
-which watches KubeFed CRD's and the corresponding resources in
-member clusters and does the necessary reconciliation`,
+which watch KubeFed CRD's and the corresponding resources in
+member clusters and do the necessary reconciliation`,
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stdout, "KubeFed controller-manager version: %s\n", fmt.Sprintf("%#v", version.Get()))
 			if verFlag {
@@ -105,6 +107,22 @@ func Run(opts *options.Options, stopChan <-chan struct{}) error {
 	opts.Config.KubeConfig, err = clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 	if err != nil {
 		panic(err)
+	}
+
+	runningInCluster := len(masterURL) == 0 && len(kubeconfig) == 0
+	if runningInCluster && len(opts.Config.KubeFedNamespace) == 0 {
+		// For in-cluster deployment set the namespace associated
+		// with the service account token
+		data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+		if err != nil {
+			klog.Fatalf("An error occurred while attempting to discover the KubeFed namespace from the service account: %v", err)
+		}
+		opts.Config.KubeFedNamespace = strings.TrimSpace(string(data))
+	}
+
+	// Validate if a kubefed-namespace is configured
+	if len(opts.Config.KubeFedNamespace) == 0 {
+		klog.Fatalf("The KubeFed namespace must be specified via --kubefed-namespace")
 	}
 
 	setOptionsByKubeFedConfig(opts)
@@ -196,7 +214,7 @@ func getKubeFedConfig(opts *options.Options) *corev1b1.KubeFedConfig {
 
 		err := client.Get(context.Background(), fedConfig, namespace, name)
 		if apierrors.IsNotFound(err) {
-			klog.Infof("Cannot retrieve KubeFedConfig %q: %v. Default options are used.", qualifiedName.String(), err)
+			klog.Infof("Cannot retrieve KubeFedConfig %q: %v. Default options will be used.", qualifiedName.String(), err)
 			return nil
 		}
 		if err != nil {
@@ -225,22 +243,8 @@ func getKubeFedConfig(opts *options.Options) *corev1b1.KubeFedConfig {
 	return fedConfig
 }
 
-func setDuration(target *metav1.Duration, defaultValue time.Duration) {
-	if target.Duration == 0 {
-		target.Duration = defaultValue
-	}
-}
-
-func setInt64(target *int64, defaultValue int64) {
-	if *target == 0 {
-		*target = defaultValue
-	}
-}
-
-func setDefaultKubeFedConfig(fedConfig *corev1b1.KubeFedConfig) {
-	spec := &fedConfig.Spec
-
-	if len(spec.Scope) == 0 {
+func setDefaultKubeFedConfigScope(fedConfig *corev1b1.KubeFedConfig) {
+	if len(fedConfig.Spec.Scope) == 0 {
 		// TODO(sohankunkerkar) Remove when no longer necessary.
 		// This Environment variable is a temporary addition to support Red Hat's downstream testing efforts.
 		// Its continued existence should not be relied upon.
@@ -250,34 +254,12 @@ func setDefaultKubeFedConfig(fedConfig *corev1b1.KubeFedConfig) {
 			if defaultScope != string(apiextv1b1.ClusterScoped) && defaultScope != string(apiextv1b1.NamespaceScoped) {
 				klog.Fatalf("%s must be Cluster or Namespaced; got %q", defaultScopeEnv, defaultScope)
 			}
-			spec.Scope = apiextv1b1.ResourceScope(defaultScope)
+			fedConfig.Spec.Scope = apiextv1b1.ResourceScope(defaultScope)
 		}
-	}
-
-	duration := &spec.ControllerDuration
-	setDuration(&duration.AvailableDelay, util.DefaultClusterAvailableDelay)
-	setDuration(&duration.UnavailableDelay, util.DefaultClusterUnavailableDelay)
-
-	election := &spec.LeaderElect
-	if len(election.ResourceLock) == 0 {
-		election.ResourceLock = util.DefaultLeaderElectionResourceLock
-	}
-	setDuration(&election.RetryPeriod, util.DefaultLeaderElectionRetryPeriod)
-	setDuration(&election.RenewDeadline, util.DefaultLeaderElectionRenewDeadline)
-	setDuration(&election.LeaseDuration, util.DefaultLeaderElectionLeaseDuration)
-
-	healthCheck := &spec.ClusterHealthCheck
-	setInt64(&healthCheck.PeriodSeconds, util.DefaultClusterHealthCheckPeriod)
-	setInt64(&healthCheck.TimeoutSeconds, util.DefaultClusterHealthCheckTimeout)
-	setInt64(&healthCheck.FailureThreshold, util.DefaultClusterHealthCheckFailureThreshold)
-	setInt64(&healthCheck.SuccessThreshold, util.DefaultClusterHealthCheckSuccessThreshold)
-
-	if len(spec.SyncController.AdoptResources) == 0 {
-		spec.SyncController.AdoptResources = corev1b1.AdoptResourcesEnabled
 	}
 }
 
-func updateKubeFedConfig(config *rest.Config, fedConfig *corev1b1.KubeFedConfig) {
+func createKubeFedConfig(config *rest.Config, fedConfig *corev1b1.KubeFedConfig) {
 	name := fedConfig.Name
 	namespace := fedConfig.Namespace
 	qualifiedName := util.QualifiedName{
@@ -285,24 +267,13 @@ func updateKubeFedConfig(config *rest.Config, fedConfig *corev1b1.KubeFedConfig)
 		Name:      name,
 	}
 
-	configResource := &corev1b1.KubeFedConfig{}
 	client := genericclient.NewForConfigOrDieWithUserAgent(config, "kubefedconfig")
-	err := client.Get(context.Background(), configResource, namespace, name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		klog.Fatalf("Error retrieving KubeFedConfig %q: %v", qualifiedName, err)
-	}
-	if apierrors.IsNotFound(err) {
-		// if `--kubefed-config` is specifed but there is not KubeFedConfig resource accordingly
-		err = client.Create(context.Background(), fedConfig)
-		if err != nil {
-			klog.Fatalf("Error creating KubeFedConfig %q: %v", qualifiedName, err)
-		}
-	} else {
-		configResource.Spec = fedConfig.Spec
-		err = client.Update(context.Background(), configResource)
-		if err != nil {
-			klog.Fatalf("Error updating KubeFedConfig %q: %v", qualifiedName, err)
-		}
+	// Create the KubeFedConfig requested by the caller since no KubeFedConfig
+	// was detected so far because `--kubefed-config` was not specified and
+	// none already existed in the API.
+	err := client.Create(context.Background(), fedConfig)
+	if err != nil {
+		klog.Fatalf("Error creating KubeFedConfig %q: %v", qualifiedName, err)
 	}
 }
 
@@ -323,9 +294,26 @@ func setOptionsByKubeFedConfig(opts *options.Options) {
 				Namespace: qualifiedName.Namespace,
 			},
 		}
+
+		setDefaultKubeFedConfigScope(fedConfig)
+		createKubeFedConfig(opts.Config.KubeConfig, fedConfig)
 	}
 
-	setDefaultKubeFedConfig(fedConfig)
+	qualifedName := util.QualifiedName{
+		Name:      fedConfig.Name,
+		Namespace: fedConfig.Namespace,
+	}
+
+	// This covers the case of the KubeFedConfig resource provided via a YAML
+	// file or already existing before the defaulting and validation webhook
+	// was registered e.g. prior to installation, upgrading, or due to issue
+	// https://github.com/kubernetes-sigs/kubefed/issues/983.
+	errs := validation.ValidateKubeFedConfig(fedConfig, nil)
+	if len(errs) != 0 {
+		klog.Fatalf("Error: invalid KubeFedConfig %q: %v", qualifedName, errs)
+	} else {
+		klog.Infof("Using valid KubeFedConfig %q", qualifedName)
+	}
 
 	spec := fedConfig.Spec
 	opts.Scope = spec.Scope
@@ -333,19 +321,17 @@ func setOptionsByKubeFedConfig(opts *options.Options) {
 	opts.Config.ClusterAvailableDelay = spec.ControllerDuration.AvailableDelay.Duration
 	opts.Config.ClusterUnavailableDelay = spec.ControllerDuration.UnavailableDelay.Duration
 
-	opts.LeaderElection.ResourceLock = spec.LeaderElect.ResourceLock
+	opts.LeaderElection.ResourceLock = *spec.LeaderElect.ResourceLock
 	opts.LeaderElection.RetryPeriod = spec.LeaderElect.RetryPeriod.Duration
 	opts.LeaderElection.RenewDeadline = spec.LeaderElect.RenewDeadline.Duration
 	opts.LeaderElection.LeaseDuration = spec.LeaderElect.LeaseDuration.Duration
 
-	opts.ClusterHealthCheckConfig.PeriodSeconds = spec.ClusterHealthCheck.PeriodSeconds
-	opts.ClusterHealthCheckConfig.TimeoutSeconds = spec.ClusterHealthCheck.TimeoutSeconds
-	opts.ClusterHealthCheckConfig.FailureThreshold = spec.ClusterHealthCheck.FailureThreshold
-	opts.ClusterHealthCheckConfig.SuccessThreshold = spec.ClusterHealthCheck.SuccessThreshold
+	opts.ClusterHealthCheckConfig.Period = spec.ClusterHealthCheck.Period.Duration
+	opts.ClusterHealthCheckConfig.Timeout = spec.ClusterHealthCheck.Timeout.Duration
+	opts.ClusterHealthCheckConfig.FailureThreshold = *spec.ClusterHealthCheck.FailureThreshold
+	opts.ClusterHealthCheckConfig.SuccessThreshold = *spec.ClusterHealthCheck.SuccessThreshold
 
-	opts.Config.SkipAdoptingResources = spec.SyncController.AdoptResources == corev1b1.AdoptResourcesDisabled
-
-	updateKubeFedConfig(opts.Config.KubeConfig, fedConfig)
+	opts.Config.SkipAdoptingResources = *spec.SyncController.AdoptResources == corev1b1.AdoptResourcesDisabled
 
 	var featureGates = make(map[string]bool)
 	for _, v := range fedConfig.Spec.FeatureGates {

@@ -10,7 +10,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 rules:
 - apiGroups:
-  - scheduling.kubefed.k8s.io
+  - scheduling.kubefed.io
   resources:
   - '*'
   verbs:
@@ -19,17 +19,7 @@ rules:
   - list
   - update
 - apiGroups:
-  - multiclusterdns.kubefed.k8s.io
-  resources:
-  - '*'
-  verbs:
-  - get
-  - watch
-  - list
-  - create
-  - update
-- apiGroups:
-  - core.kubefed.k8s.io
+  - multiclusterdns.kubefed.io
   resources:
   - '*'
   verbs:
@@ -39,7 +29,17 @@ rules:
   - create
   - update
 - apiGroups:
-  - types.kubefed.k8s.io
+  - core.kubefed.io
+  resources:
+  - '*'
+  verbs:
+  - get
+  - watch
+  - list
+  - create
+  - update
+- apiGroups:
+  - types.kubefed.io
   resources:
   - '*'
   verbs:
@@ -82,6 +82,8 @@ rules:
   verbs:
   - get
 ---
+# Only need access to these core namespaced resources in the KubeFed system
+# namespace regardless of kubefed deployment scope.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -92,23 +94,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
 rules:
 - apiGroups:
-  - core.kubefed.k8s.io
+  - core.kubefed.io
   resources:
-  - '*'
+  - federatedtypeconfigs
+  - kubefedclusters
+  - kubefedconfigs
   verbs:
   - get
   - watch
   - list
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: system:kubefed:admission-requester
-rules:
-- apiGroups:
-  - admission.core.kubefed.k8s.io
-  resources:
-  - federatedtypeconfigs
-  - kubefedclusters
-  verbs:
-  - create

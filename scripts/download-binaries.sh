@@ -42,6 +42,7 @@ dest_dir="${root_dir}/bin"
 mkdir -p "${dest_dir}"
 
 platform=$(uname -s|tr A-Z a-z)
+
 kb_version="1.0.8"
 kb_tgz="kubebuilder_${kb_version}_${platform}_amd64.tar.gz"
 kb_url="https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${kb_version}/${kb_tgz}"
@@ -56,12 +57,14 @@ curl "${curl_args}O" "${helm_url}" \
     && tar xzfp "${helm_tgz}" -C "${dest_dir}" --strip-components=1 "${platform}-amd64/helm" \
     && rm "${helm_tgz}"
 
-golint_version="1.16.0"
+# TODO(marun) Update to newer version of golangci-lint when
+# https://github.com/golangci/golangci-lint/issues/483 is fixed.
+golint_version="1.15.0"
 golint_dir="golangci-lint-${golint_version}-${platform}-amd64"
 golint_tgz="${golint_dir}.tar.gz"
-golint_url="https://github.com/golangci/golangci-lint/releases/download/v1.16.0/${golint_tgz}"
+golint_url="https://github.com/golangci/golangci-lint/releases/download/v${golint_version}/${golint_tgz}"
 curl "${curl_args}O" "${golint_url}" \
-    && tar xzfP "${golint_tgz}" -C "${dest_dir}" "${golint_dir}/golangci-lint" --strip-components=1 \
+    && tar xzfP "${golint_tgz}" -C "${dest_dir}" --strip-components=1 "${golint_dir}/golangci-lint" \
     && rm "${golint_tgz}"
 
 echo    "# destination:"

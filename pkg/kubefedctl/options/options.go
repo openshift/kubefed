@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/pflag"
 
 	apiextv1b1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 
 	fedv1b1 "sigs.k8s.io/kubefed/pkg/apis/core/v1beta1"
@@ -85,7 +86,11 @@ func GetScopeFromKubeFedConfig(hostConfig *rest.Config, namespace string) (apiex
 
 	fedConfig := &fedv1b1.KubeFedConfig{}
 	err = client.Get(context.TODO(), fedConfig, namespace, util.KubeFedConfigName)
-	if err != nil {
+	if apierrors.IsNotFound(err) {
+		return "", errors.Errorf(
+			"A KubeFedConfig named %q was not found in namespace %q. Is a KubeFed control plane running in this namespace?",
+			util.KubeFedConfigName, namespace)
+	} else if err != nil {
 		config := util.QualifiedName{
 			Namespace: namespace,
 			Name:      util.KubeFedConfigName,
@@ -108,7 +113,7 @@ type CommonEnableOptions struct {
 // Default values for the federated group and version used by
 // the enable and disable subcommands of `kubefedctl`.
 const (
-	DefaultFederatedGroup   = "types.kubefed.k8s.io"
+	DefaultFederatedGroup   = "types.kubefed.io"
 	DefaultFederatedVersion = "v1beta1"
 )
 

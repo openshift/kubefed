@@ -80,6 +80,19 @@ Install the chart and specify the version to install with the
 $ helm install kubefed-charts/kubefed --name kubefed --version=<x.x.x> --namespace kube-federation-system
 ```
 
+**NOTE:** For **namespace-scoped deployments** (configured with the `--set
+global.scope=Namespaced` option in the `helm install` command): if you created
+your namespace prior to installing the chart, make sure to **add a `name:
+<namespace>` label to the namespace** using the following command:
+
+```bash
+kubectl label namespaces <namespace> name=<namespace>
+```
+
+This label is necessary to get proper validation for KubeFed core APIs. If the
+namespace does not already exist, the `helm install` command will create the
+namespace with this label by default.
+
 ## Uninstalling the Chart
 
 Due to this helm [issue](https://github.com/helm/helm/issues/4440), the CRDs cannot be deleted
@@ -95,7 +108,7 @@ $ kubectl -n kube-federation-system delete FederatedTypeConfig --all
 Delete all KubeFed CRDs:
 
 ```bash
-$ kubectl delete crd $(kubectl get crd | grep -E 'kubefed.k8s.io' | awk '{print $1}')
+$ kubectl delete crd $(kubectl get crd | grep -E 'kubefed.io' | awk '{print $1}')
 ```
 
 Then you can uninstall/delete the `kubefed` release:
@@ -130,10 +143,10 @@ chart and their default values.
 | controllermanager.leaderElectRenewDeadline | The interval between attempts by the acting master to renew a leadership slot before it stops leading. This must be less than or equal to `controllermanager.LeaderElectLeaseDuration. | 10s                             |
 | controllermanager.leaderElectRetryPeriod   | The duration the clients should wait between attempting acquisition and renewal of a leadership.                                                                                       | 5s                              |
 | controllermanager.leaderElectResourceLock  | The type of resource object that is used for locking during leader election. Supported options are `configmaps` and `endpoints`.                                                       | configmaps                      |
-| controllermanager.clusterHealthCheckPeriodSeconds    | How often to monitor the cluster health (in seconds).                                                                                                                        | 10                              |
+| controllermanager.clusterHealthCheckPeriod           | How often to monitor the cluster health.                                                                                                                                     | 10s                              |
 | controllermanager.clusterHealthCheckFailureThreshold | Minimum consecutive failures for the cluster health to be considered failed after having succeeded.                                                                          | 3                               |
 | controllermanager.clusterHealthCheckSuccessThreshold | Minimum consecutive successes for the cluster health to be considered successful after having failed.                                                                        | 1                               |
-| controllermanager.clusterHealthCheckTimeoutSeconds   | Number of seconds after which the cluster health check times out.                                                                                                            | 3                               |
+| controllermanager.clusterHealthCheckTimeout          | Duration after which the cluster health check times out.                                                                                                                     | 3s                               |
 | controllermanager.syncController.adoptResources  | Whether to adopt pre-existing resource in member clusters.                                                                                                        		          | Enabled                         |
 | global.scope                   | Whether the KubeFed namespace will be the only target for the control plane.                                                                                                                           | Cluster                         |
 

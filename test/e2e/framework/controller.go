@@ -17,6 +17,10 @@ limitations under the License.
 package framework
 
 import (
+	"io"
+	"os/exec"
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/kubefed/pkg/apis/core/typeconfig"
@@ -106,7 +110,7 @@ func NewClusterControllerFixture(tl common.TestLogger, config *util.ControllerCo
 	f := &ControllerFixture{
 		stopChan: make(chan struct{}),
 	}
-	clusterHealthCheckConfig := &util.ClusterHealthCheckConfig{PeriodSeconds: 1, FailureThreshold: 1}
+	clusterHealthCheckConfig := &util.ClusterHealthCheckConfig{Period: 1 * time.Second, FailureThreshold: 1}
 	err := kubefedcluster.StartClusterController(config, clusterHealthCheckConfig, f.stopChan)
 	if err != nil {
 		tl.Fatalf("Error starting cluster controller: %v", err)
@@ -124,6 +128,20 @@ func NewSchedulingManagerFixture(tl common.TestLogger, config *util.ControllerCo
 		tl.Fatalf("Error starting scheduler controller: %v", err)
 	}
 	return f, manager
+}
+
+func StartControllerManager(args []string) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.Command("controller-manager", args...)
+
+	logStream, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	return cmd, logStream, nil
 }
 
 func (f *ControllerFixture) TearDown(tl common.TestLogger) {

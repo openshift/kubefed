@@ -1,4 +1,4 @@
-apiVersion: types.kubefed.k8s.io/v1beta1
+apiVersion: types.kubefed.io/v1beta1
 kind: FederatedJob
 metadata:
   name: test-job
@@ -29,5 +29,5 @@ spec:
   overrides:
   - clusterName: cluster2
     clusterOverrides:
-    - path: spec.parallelism
+    - path: /spec/parallelism
       value: 2

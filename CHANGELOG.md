@@ -1,4 +1,48 @@
 # Unreleased
+-  [#1058](https://github.com/kubernetes-sigs/kubefed/issues/1058)
+   KubeFedConfig spec.scope is now immutable.
+-  [#1052](https://github.com/kubernetes-sigs/kubefed/pull/1052)
+   Support has been added for varying the `apiVersion` of target
+   resources. This is intended to allow a federated type to manage
+   more than one version of the target type across member clusters.
+   `apiVersion` can be set either in the template of a federated
+   resource or via override.
+-  [#951](https://github.com/kubernetes-sigs/kubefed/issues/951)
+   Propagation status for a namespaced federated resource whose
+   containing namespace is not federated now indicates an unhealthy
+   state.
+-  [#1053](https://github.com/kubernetes-sigs/kubefed/pull/1053) API group
+   changed from kubefed.k8s.io to kubefed.io.
+
+# v0.1.0-rc4
+-  [#908](https://github.com/kubernetes-sigs/kubefed/issues/908) Adds admission
+   webhook validations for KubeFedCluster API.
+-  [#982](https://github.com/kubernetes-sigs/kubefed/issues/982) To
+   ensure compatibility with controllers in member clusters,
+   metadata.finalizers and metadata.annotations can no longer be set
+   from the template of a federated resource and values for these
+   fields are always retained. The addition of jsonpatch overrides
+   ensures that it is still possible to add or remove entries from
+   these collections.
+-  [#1013](https://github.com/kubernetes-sigs/kubefed/issues/1013) Add support
+   for defaulting KubeFedConfigs using mutating admission webhook.
+-  [#1038](https://github.com/kubernetes-sigs/kubefed/pull/1038) Removed template validation schema from Federated API's to facilitate upgrade scenarios.
+-  [#690](https://github.com/kubernetes-sigs/kubefed/issues/690) Extends `kubefedctl`
+   by adding the `orphaning-deletion` command, which allows to `enable` or `disable`
+   leaving managed resources, when their relevant federated resource is deleted.
+   In addition, the command allows to check current `status` of the orphaning deletion
+   mode.
+-  [#1044](https://github.com/kubernetes-sigs/kubefed/issues/1044) If a target namespace
+   of `federate` and all `orphaning-deletion` commands is not specified, use the namespace from
+   the client kubeconfig context.
+
+# v0.1.0-rc3
+-  [#520](https://github.com/kubernetes-sigs/kubefed/issues/520) Adds support
+   for jsonpath overrides.
+-  [#965](https://github.com/kubernetes-sigs/kubefed/issues/965) Adds admission
+   webhook support for namespace-scoped deployments.
+-  [#941](https://github.com/kubernetes-sigs/kubefed/issues/941) Adds
+   admission webhook validations for KubeFedConfig API.
 -  [#909](https://github.com/kubernetes-sigs/kubefed/issues/909) Adds
    admission webhook validations for FederatedTypeConfig API.
 

@@ -19,9 +19,10 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"github.com/pkg/errors"
 	"sort"
 	"strings"
+
+	"github.com/pkg/errors"
 
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -93,7 +94,7 @@ var _ = Describe("ServiceDNS", func() {
 		for _, clusterName := range f.ClusterNames(userAgent) {
 			serviceDNSStatus.DNS = append(serviceDNSStatus.DNS, dnsv1a1.ClusterDNS{
 				Cluster: clusterName,
-				Region:  clusterRegionZones[clusterName].Region,
+				Region:  *clusterRegionZones[clusterName].Region,
 				Zones:   clusterRegionZones[clusterName].Zones,
 			})
 		}
@@ -103,7 +104,7 @@ var _ = Describe("ServiceDNS", func() {
 
 		serviceDNS.Status = serviceDNSStatus
 		By("Waiting for the ServiceDNS object to have correct status")
-		common.WaitForObject(tl, namespace, serviceDNS.Name, objectGetter, serviceDNS, framework.PollInterval, framework.TestContext.SingleCallTimeout)
+		framework.WaitForObject(tl, namespace, serviceDNS.Name, objectGetter, serviceDNS, common.Equivalent)
 	})
 
 	Context("When ServiceDNS object is created", func() {
@@ -126,7 +127,7 @@ var _ = Describe("ServiceDNS", func() {
 			serviceDNS.Status = *serviceDNSStatus
 
 			By("Waiting for the ServiceDNS object to have correct status")
-			common.WaitForObject(tl, namespace, name, objectGetter, serviceDNS, framework.PollInterval, framework.TestContext.SingleCallTimeout)
+			framework.WaitForObject(tl, namespace, name, objectGetter, serviceDNS, common.Equivalent)
 
 			By("Waiting for the DNSEndpoint object to be created")
 			endpointObjectGetter := func(namespace, name string) (pkgruntime.Object, error) {
@@ -138,7 +139,7 @@ var _ = Describe("ServiceDNS", func() {
 			endpoints := []*dnsv1a1.Endpoint{}
 			for _, cluster := range serviceDNS.Status.DNS {
 				zones := clusterRegionZones[cluster.Cluster].Zones
-				region := clusterRegionZones[cluster.Cluster].Region
+				region := *clusterRegionZones[cluster.Cluster].Region
 				lbs := dnsendpoint.ExtractLoadBalancerTargets(cluster.LoadBalancer)
 
 				endpoint := common.NewDNSEndpoint(
@@ -164,7 +165,7 @@ var _ = Describe("ServiceDNS", func() {
 				},
 			}
 
-			common.WaitForObject(tl, namespace, "service-"+name, endpointObjectGetter, desiredDNSEndpoint, framework.PollInterval, framework.TestContext.SingleCallTimeout)
+			framework.WaitForObject(tl, namespace, "service-"+name, endpointObjectGetter, desiredDNSEndpoint, common.Equivalent)
 		})
 	})
 })
@@ -187,7 +188,7 @@ func createClusterServiceAndEndpoints(f framework.KubeFedFramework, name, namesp
 		serviceDNSStatus.DNS = append(serviceDNSStatus.DNS, dnsv1a1.ClusterDNS{
 			Cluster:      clusterName,
 			LoadBalancer: loadbalancerStatus,
-			Region:       clusterRegionZones[clusterName].Region,
+			Region:       *clusterRegionZones[clusterName].Region,
 			Zones:        clusterRegionZones[clusterName].Zones,
 		})
 
@@ -225,7 +226,8 @@ func ensureClustersHaveRegionZoneAttributes(tl common.TestLogger, client generic
 	clusterRegionZones := make(map[string]fedv1b1.KubeFedClusterStatus)
 	for i, cluster := range clusters.Items {
 		err := wait.PollImmediate(framework.PollInterval, framework.TestContext.SingleCallTimeout, func() (bool, error) {
-			cluster.Status.Region = fmt.Sprintf("r%d", i)
+			region := fmt.Sprintf("r%d", i)
+			cluster.Status.Region = &region
 			cluster.Status.Zones = []string{fmt.Sprintf("z%d", i)}
 
 			err := client.UpdateStatus(context.TODO(), &cluster)

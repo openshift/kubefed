@@ -3,7 +3,7 @@
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
 - [Releasing KubeFed](#releasing-kubefed)
-- [How image is automatically published](#how-image-is-automatically-published)
+- [How Image is Automatically Published](#how-image-is-automatically-published)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -47,7 +47,10 @@ Creating a KubeFed release involves the following steps:
       next to the sha256 digest under the `MANIFEST` column to indicate that
       the image tags `latest` and `<tag>` are identical. Hovering over this
       "link" symbol shows the tags having the same common image.
-4. Build the release artifacts (will output to root of repo)
+4. Build the release artifacts (will output to root of repo).
+   - Make sure `helm` is in your `PATH`. If not, execute:
+     - `./scripts/download-binaries.sh`
+     - `export PATH=$(pwd)/bin:${PATH}`
    - `./scripts/build-release-artifacts.sh <tag>`
 5. Create github release
    1. Copy text from old release and replace old tag references

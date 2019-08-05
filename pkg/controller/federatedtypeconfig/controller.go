@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/kubefed/pkg/controller/util"
 )
 
-const finalizer string = "core.kubefed.k8s.io/federated-type-config"
+const finalizer string = "core.kubefed.io/federated-type-config"
 
 // The FederatedTypeConfig controller configures sync and status
 // controllers in response to FederatedTypeConfig resources in the
@@ -233,6 +233,14 @@ func (c *Controller) reconcile(qualifiedName util.QualifiedName) util.Reconcilia
 		c.stopController(statusKey, statusStopChan)
 	}
 
+	if !startNewSyncController && !stopSyncController &&
+		typeConfig.Status.ObservedGeneration != typeConfig.Generation {
+		if err := c.refreshSyncController(typeConfig); err != nil {
+			runtime.HandleError(err)
+			return util.StatusError
+		}
+	}
+
 	typeConfig.Status.ObservedGeneration = typeConfig.Generation
 	syncControllerRunning := startNewSyncController || (syncRunning && !stopSyncController)
 	if syncControllerRunning {
@@ -296,13 +304,25 @@ func (c *Controller) startSyncController(tc *corev1b1.FederatedTypeConfig) error
 	// cluster-scoped KubeFed control plane.  A namespace-scoped
 	// control plane would still have to use a non-shared informer due
 	// to it not being possible to limit its scope.
-	kind := tc.Spec.FederatedType.Kind
-	fedNamespaceAPIResource, err := c.getFederatedNamespaceAPIResource()
-	if err != nil {
-		return errors.Wrapf(err, "Unable to start sync controller for %q due to missing FederatedTypeConfig for namespaces", kind)
+
+	ftc := tc.DeepCopyObject().(*corev1b1.FederatedTypeConfig)
+	kind := ftc.Spec.FederatedType.Kind
+
+	// A sync controller for a namespaced resource must be supplied
+	// with the ftc for namespaces so that it can consider federated
+	// namespace placement when determining the placement for
+	// contained resources.
+	var fedNamespaceAPIResource *metav1.APIResource
+	if ftc.GetNamespaced() {
+		var err error
+		fedNamespaceAPIResource, err = c.getFederatedNamespaceAPIResource()
+		if err != nil {
+			return errors.Wrapf(err, "Unable to start sync controller for %q due to missing FederatedTypeConfig for namespaces", kind)
+		}
 	}
+
 	stopChan := make(chan struct{})
-	err = synccontroller.StartKubeFedSyncController(c.controllerConfig, stopChan, tc, fedNamespaceAPIResource)
+	err := synccontroller.StartKubeFedSyncController(c.controllerConfig, stopChan, ftc, fedNamespaceAPIResource)
 	if err != nil {
 		close(stopChan)
 		return errors.Wrapf(err, "Error starting sync controller for %q", kind)
@@ -310,14 +330,15 @@ func (c *Controller) startSyncController(tc *corev1b1.FederatedTypeConfig) error
 	klog.Infof("Started sync controller for %q", kind)
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.stopChannels[tc.Name] = stopChan
+	c.stopChannels[ftc.Name] = stopChan
 	return nil
 }
 
 func (c *Controller) startStatusController(statusKey string, tc *corev1b1.FederatedTypeConfig) error {
 	kind := tc.Spec.FederatedType.Kind
 	stopChan := make(chan struct{})
-	err := statuscontroller.StartKubeFedStatusController(c.controllerConfig, stopChan, tc)
+	ftc := tc.DeepCopyObject().(*corev1b1.FederatedTypeConfig)
+	err := statuscontroller.StartKubeFedStatusController(c.controllerConfig, stopChan, ftc)
 	if err != nil {
 		close(stopChan)
 		return errors.Wrapf(err, "Error starting status controller for %q", kind)
@@ -335,6 +356,17 @@ func (c *Controller) stopController(key string, stopChan chan struct{}) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	delete(c.stopChannels, key)
+}
+
+func (c *Controller) refreshSyncController(tc *corev1b1.FederatedTypeConfig) error {
+	klog.Infof("refreshing sync controller for %q", tc.Name)
+
+	syncStopChan, ok := c.getStopChannel(tc.Name)
+	if ok {
+		c.stopController(tc.Name, syncStopChan)
+	}
+
+	return c.startSyncController(tc)
 }
 
 func (c *Controller) ensureFinalizer(tc *corev1b1.FederatedTypeConfig) (bool, error) {
@@ -373,9 +405,6 @@ func (c *Controller) namespaceFTCExists() bool {
 }
 
 func (c *Controller) getFederatedNamespaceAPIResource() (*metav1.APIResource, error) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
 	qualifiedName := util.QualifiedName{
 		Namespace: c.controllerConfig.KubeFedNamespace,
 		Name:      util.NamespaceName,

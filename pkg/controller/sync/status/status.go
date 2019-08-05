@@ -31,8 +31,6 @@ import (
 
 type PropagationStatus string
 
-type AggregateStatus string
-
 type AggregateReason string
 
 type ConditionType string
@@ -45,6 +43,7 @@ const (
 	ClusterNotReady        PropagationStatus = "ClusterNotReady"
 	CachedRetrievalFailed  PropagationStatus = "CachedRetrievalFailed"
 	ComputeResourceFailed  PropagationStatus = "ComputeResourceFailed"
+	ApplyOverridesFailed   PropagationStatus = "ApplyOverridesFailed"
 	CreationFailed         PropagationStatus = "CreationFailed"
 	UpdateFailed           PropagationStatus = "UpdateFailed"
 	DeletionFailed         PropagationStatus = "DeletionFailed"
@@ -65,6 +64,7 @@ const (
 	ClusterRetrievalFailed AggregateReason = "ClusterRetrievalFailed"
 	ComputePlacementFailed AggregateReason = "ComputePlacementFailed"
 	CheckClusters          AggregateReason = "CheckClusters"
+	NamespaceNotFederated  AggregateReason = "NamespaceNotFederated"
 
 	PropagationConditionType ConditionType = "Propagation"
 )
@@ -176,17 +176,16 @@ func (s *GenericPropagationStatus) setPropagationCondition(reason AggregateReaso
 		s.Conditions = append(s.Conditions, propCondition)
 	}
 
+	propCondition.Status = newStatus
+	propCondition.Reason = reason
+	propCondition.LastProbeTime = time.Now().UTC().Format(time.RFC3339)
+
 	// Determine whether the latest status represents a change from
 	// the old that requires updating the transition time.
 	transition := newCondition || propCondition.Status != newStatus
 	if transition {
-		propCondition.Status = newStatus
-		propCondition.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
-
+		propCondition.LastTransitionTime = propCondition.LastProbeTime
 	}
-
-	propCondition.Reason = reason
-	propCondition.LastProbeTime = time.Now().UTC().Format(time.RFC3339)
 
 }
 

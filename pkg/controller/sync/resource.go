@@ -26,8 +26,10 @@ import (
 	"github.com/pkg/errors"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	pkgruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 
@@ -49,7 +51,7 @@ type FederatedResource interface {
 	UpdateVersions(selectedClusters []string, versionMap map[string]string) error
 	DeleteVersions()
 	ComputePlacement(clusters []*fedv1b1.KubeFedCluster) (selectedClusters sets.String, err error)
-	IsNamespaceInHostCluster(clusterObj pkgruntime.Object) bool
+	NamespaceNotFederated() bool
 }
 
 type federatedResource struct {
@@ -84,6 +86,11 @@ func (r *federatedResource) TargetName() util.QualifiedName {
 
 func (r *federatedResource) TargetKind() string {
 	return r.typeConfig.GetTargetType().Kind
+}
+
+func (r *federatedResource) TargetGVK() schema.GroupVersionKind {
+	apiResource := r.typeConfig.GetTargetType()
+	return apiResourceToGVK(&apiResource)
 }
 
 func (r *federatedResource) Object() *unstructured.Unstructured {
@@ -129,6 +136,10 @@ func (r *federatedResource) ComputePlacement(clusters []*fedv1b1.KubeFedCluster)
 	return computePlacement(r.federatedResource, clusters)
 }
 
+func (r *federatedResource) NamespaceNotFederated() bool {
+	return r.typeConfig.GetNamespaced() && r.fedNamespace == nil
+}
+
 func (r *federatedResource) IsNamespaceInHostCluster(clusterObj pkgruntime.Object) bool {
 	// TODO(marun) This comment should be added to the documentation
 	// and removed from this function (where it is no longer
@@ -165,6 +176,17 @@ func (r *federatedResource) ObjectForCluster(clusterName string) (*unstructured.
 	}
 	obj := &unstructured.Unstructured{Object: templateBody}
 
+	notSupportedTemplate := "metadata.%s cannot be set via template to avoid conflicting with controllers " +
+		"in member clusters. Consider using an override to add or remove elements from this collection."
+	if len(obj.GetAnnotations()) > 0 {
+		r.RecordError("AnnotationsNotSupported", errors.Errorf(notSupportedTemplate, "annotations"))
+		obj.SetAnnotations(nil)
+	}
+	if len(obj.GetFinalizers()) > 0 {
+		r.RecordError("FinalizersNotSupported", errors.Errorf(notSupportedTemplate, "finalizers"))
+		obj.SetFinalizers(nil)
+	}
+
 	// Avoid having to duplicate these details in the template or have
 	// the name/namespace vary between the KubeFed api and member
 	// clusters.
@@ -176,18 +198,27 @@ func (r *federatedResource) ObjectForCluster(clusterName string) (*unstructured.
 	}
 	targetApiResource := r.typeConfig.GetTargetType()
 	obj.SetKind(targetApiResource.Kind)
-	obj.SetAPIVersion(fmt.Sprintf("%s/%s", targetApiResource.Group, targetApiResource.Version))
 
+	// If the template does not specify an api version, default it to
+	// the one configured for the target type in the FTC.
+	if len(obj.GetAPIVersion()) == 0 {
+		obj.SetAPIVersion(fmt.Sprintf("%s/%s", targetApiResource.Group, targetApiResource.Version))
+	}
+
+	return obj, nil
+}
+
+// ApplyOverrides applies overrides for the named cluster to the given
+// object. The managed label is added afterwards to ensure labeling even if an
+// override was attempted.
+func (r *federatedResource) ApplyOverrides(obj *unstructured.Unstructured, clusterName string) error {
 	overrides, err := r.overridesForCluster(clusterName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if overrides != nil {
-		for path, value := range overrides {
-			pathEntries := strings.Split(path, ".")
-			if err := unstructured.SetNestedField(obj.Object, value, pathEntries...); err != nil {
-				return nil, err
-			}
+		if err := util.ApplyJsonPatch(obj, overrides); err != nil {
+			return err
 		}
 	}
 
@@ -196,7 +227,7 @@ func (r *federatedResource) ObjectForCluster(clusterName string) (*unstructured.
 	// KubeFed controllers.
 	util.AddManagedLabel(obj)
 
-	return obj, nil
+	return nil
 }
 
 // TODO(marun) Use an enumeration for errorCode.
@@ -208,7 +239,7 @@ func (r *federatedResource) RecordEvent(reason, messageFmt string, args ...inter
 	r.eventRecorder.Eventf(r.Object(), corev1.EventTypeNormal, reason, messageFmt, args...)
 }
 
-func (r *federatedResource) overridesForCluster(clusterName string) (util.ClusterOverridesMap, error) {
+func (r *federatedResource) overridesForCluster(clusterName string) (util.ClusterOverrides, error) {
 	r.Lock()
 	defer r.Unlock()
 	if r.overridesMap == nil {
@@ -263,4 +294,12 @@ func hashUnstructured(obj *unstructured.Unstructured, description string) (strin
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func apiResourceToGVK(apiResource *metav1.APIResource) schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   apiResource.Group,
+		Version: apiResource.Version,
+		Kind:    apiResource.Kind,
+	}
 }

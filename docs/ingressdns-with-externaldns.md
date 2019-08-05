@@ -30,7 +30,7 @@ The above diagram illustrates MCIDNS. A typical MCIDNS workflow consists of:
 MCIDNS is comprised of multiple types and controllers:
 
 - The Ingress DNS Controller watches for `IngressDNSRecord` resources and updates the status of the resource with the IP
-  address of matching target `Ingress` resource(s).
+  address of matching (matching here means the resource with the same name and namespace) target `Ingress` resource(s).
 - The DNS Endpoint Controller watches for `IngressDNSRecord` resources and creates an associated `DNSEndpoint`
   resource. `DNSEndpoint` contains the necessary information to create an external DNS record. An external DNS system
   (i.e. [ExternalDNS](https://github.com/kubernetes-incubator/external-dns)) is responsible for watching `DNSEndpoint`
@@ -47,7 +47,7 @@ Setting-up MCIDNS can be accomplished by referencing the following documentation
   ExternalDNS. Reference your DNS provider documentation on how to create a domain or delegate a subdomain.
 - The [ExternalDNS](https://github.com/kubernetes-incubator/external-dns) user guides to run the external-dns
   controller. You must ensure the following `args` are provided in the external-dns Deployment manifest:
-  `--source=crd --crd-source-apiversion=multiclusterdns.kubefed.k8s.io/v1alpha1 --crd-source-kind=DNSEndpoint --registry=txt --txt-prefix=cname`
+  `--source=crd --crd-source-apiversion=multiclusterdns.kubefed.io/v1alpha1 --crd-source-kind=DNSEndpoint --registry=txt --txt-prefix=cname`
   **Note**: If you do not deploy the external-dns controller to the same namespace and use the default service account
   of the KubeFed control-plane, you must setup RBAC permissions allowing the controller access to necessary
   resources.
@@ -72,7 +72,7 @@ It may take a few minutes for the `ADDRESS` field of each `Ingress` to be popula
 
 ```bash
 $ cat <<EOF | kubectl create -f -
-apiVersion: multiclusterdns.kubefed.k8s.io/v1alpha1
+apiVersion: multiclusterdns.kubefed.io/v1alpha1
 kind: IngressDNSRecord
 metadata:
   name: test-ingress
@@ -91,7 +91,7 @@ populate the `targets` field of the `DNSEndpoint` resource. For example:
 $ kubectl -n test-namespace get dnsendpoints -o yaml
 apiVersion: v1
 items:
-- apiVersion: multiclusterdns.kubefed.k8s.io/v1alpha1
+- apiVersion: multiclusterdns.kubefed.io/v1alpha1
   kind: DNSEndpoint
   metadata:
     creationTimestamp: 2018-10-10T20:37:38Z
@@ -99,7 +99,7 @@ items:
     name: ingress-test-ingress
     namespace: test-namespace
     resourceVersion: "251874"
-    selfLink: /apis/multiclusterdns.kubefed.k8s.io/v1alpha1/namespaces/test-namespace/dnsendpoints/ingress-test-ingress
+    selfLink: /apis/multiclusterdns.kubefed.io/v1alpha1/namespaces/test-namespace/dnsendpoints/ingress-test-ingress
     uid: 538d1063-cccc-11e8-bebb-42010a8a00b8
   spec:
     endpoints:

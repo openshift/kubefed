@@ -1,4 +1,4 @@
-{{ if (or (or (not .Values.global.scope) (eq .Values.global.scope "Cluster")) (not (.Capabilities.APIVersions.Has "core.kubefed.k8s.io/v1beta1"))) }}
+{{ if (or (or (not .Values.global.scope) (eq .Values.global.scope "Cluster")) (not (.Capabilities.APIVersions.Has "core.kubefed.io/v1beta1"))) }}
 ---
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
@@ -8,9 +8,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: clusterpropagatedversions.core.kubefed.k8s.io
+  name: clusterpropagatedversions.core.kubefed.io
 spec:
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: ClusterPropagatedVersion
     plural: clusterpropagatedversions
@@ -76,9 +76,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: federatedservicestatuses.core.kubefed.k8s.io
+  name: federatedservicestatuses.core.kubefed.io
 spec:
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: FederatedServiceStatus
     plural: federatedservicestatuses
@@ -126,9 +126,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: propagatedversions.core.kubefed.k8s.io
+  name: propagatedversions.core.kubefed.io
 spec:
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: PropagatedVersion
     plural: propagatedversions
@@ -194,9 +194,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: federatedtypeconfigs.core.kubefed.k8s.io
+  name: federatedtypeconfigs.core.kubefed.io
 spec:
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: FederatedTypeConfig
     plural: federatedtypeconfigs
@@ -352,7 +352,7 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: kubefedclusters.core.kubefed.k8s.io
+  name: kubefedclusters.core.kubefed.io
 spec:
   additionalPrinterColumns:
   - JSONPath: .status.conditions[?(@.type=='Ready')].status
@@ -361,7 +361,7 @@ spec:
   - JSONPath: .metadata.creationTimestamp
     name: age
     type: date
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: KubeFedCluster
     plural: kubefedclusters
@@ -393,6 +393,14 @@ spec:
               description: CABundle contains the certificate authority information.
               format: byte
               type: string
+            disabledTLSValidations:
+              description: DisabledTLSValidations defines a list of checks to ignore
+                when validating the TLS connection to the member cluster.  This can
+                be any of *, SubjectName, or ValidityPeriod. If * is specified, it
+                is expected to be the only option in list.
+              items:
+                type: string
+              type: array
             secretRef:
               description: Name of the secret containing the token required to access
                 the member cluster. The secret needs to exist in the same namespace
@@ -455,6 +463,8 @@ spec:
           required:
           - conditions
           type: object
+      required:
+      - spec
   version: v1beta1
 status:
   acceptedNames:
@@ -471,9 +481,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: kubefedconfigs.core.kubefed.k8s.io
+  name: kubefedconfigs.core.kubefed.io
 spec:
-  group: core.kubefed.k8s.io
+  group: core.kubefed.io
   names:
     kind: KubeFedConfig
     plural: kubefedconfigs
@@ -502,25 +512,18 @@ spec:
                     to be considered failed after having succeeded.
                   format: int64
                   type: integer
-                periodSeconds:
-                  description: How often to monitor the cluster health (in seconds).
-                  format: int64
-                  type: integer
+                period:
+                  description: How often to monitor the cluster health.
+                  type: string
                 successThreshold:
                   description: Minimum consecutive successes for the cluster health
                     to be considered successful after having failed.
                   format: int64
                   type: integer
-                timeoutSeconds:
-                  description: Number of seconds after which the cluster health check
-                    times out.
-                  format: int64
-                  type: integer
-              required:
-              - periodSeconds
-              - failureThreshold
-              - successThreshold
-              - timeoutSeconds
+                timeout:
+                  description: Duration after which the cluster health check times
+                    out.
+                  type: string
               type: object
             controllerDuration:
               properties:
@@ -530,9 +533,6 @@ spec:
                 unavailableDelay:
                   description: Time to wait before giving up on an unhealthy cluster.
                   type: string
-              required:
-              - availableDelay
-              - unavailableDelay
               type: object
             featureGates:
               items:
@@ -572,11 +572,6 @@ spec:
                     acquisition and renewal of a leadership. This is only applicable
                     if leader election is enabled.
                   type: string
-              required:
-              - leaseDuration
-              - renewDeadline
-              - retryPeriod
-              - resourceLock
               type: object
             scope:
               description: The scope of the KubeFed control plane should be either
@@ -589,16 +584,9 @@ spec:
                   description: Whether to adopt pre-existing resources in member clusters.
                     Defaults to "Enabled".
                   type: string
-              required:
-              - adoptResources
               type: object
           required:
           - scope
-          - controllerDuration
-          - leaderElect
-          - featureGates
-          - clusterHealthCheck
-          - syncController
           type: object
       required:
       - spec
@@ -618,9 +606,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: dnsendpoints.multiclusterdns.kubefed.k8s.io
+  name: dnsendpoints.multiclusterdns.kubefed.io
 spec:
-  group: multiclusterdns.kubefed.k8s.io
+  group: multiclusterdns.kubefed.io
   names:
     kind: DNSEndpoint
     plural: dnsendpoints
@@ -693,9 +681,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: domains.multiclusterdns.kubefed.k8s.io
+  name: domains.multiclusterdns.kubefed.io
 spec:
-  group: multiclusterdns.kubefed.k8s.io
+  group: multiclusterdns.kubefed.io
   names:
     kind: Domain
     plural: domains
@@ -741,9 +729,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: ingressdnsrecords.multiclusterdns.kubefed.k8s.io
+  name: ingressdnsrecords.multiclusterdns.kubefed.io
 spec:
-  group: multiclusterdns.kubefed.k8s.io
+  group: multiclusterdns.kubefed.io
   names:
     kind: IngressDNSRecord
     plural: ingressdnsrecords
@@ -809,9 +797,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: servicednsrecords.multiclusterdns.kubefed.k8s.io
+  name: servicednsrecords.multiclusterdns.kubefed.io
 spec:
-  group: multiclusterdns.kubefed.k8s.io
+  group: multiclusterdns.kubefed.io
   names:
     kind: ServiceDNSRecord
     plural: servicednsrecords
@@ -901,9 +889,9 @@ metadata:
   creationTimestamp: null
   labels:
     controller-tools.k8s.io: "1.0"
-  name: replicaschedulingpreferences.scheduling.kubefed.k8s.io
+  name: replicaschedulingpreferences.scheduling.kubefed.io
 spec:
-  group: scheduling.kubefed.k8s.io
+  group: scheduling.kubefed.io
   names:
     kind: ReplicaSchedulingPreference
     plural: replicaschedulingpreferences

@@ -20,7 +20,7 @@ COPY cmd cmd
 COPY test test
 COPY vendor vendor
 
-RUN DOCKER_BUILD="/bin/sh -c " make hyperfed
+RUN [ -z "$SOURCE_GIT_COMMIT" ] && DOCKER_BUILD="/bin/sh -c " make hyperfed || DOCKER_BUILD="/bin/sh -c " GIT_VERSION="$BUILD_VERSION" GIT_TAG="$SOURCE_GIT_TAG" GIT_HASH="$SOURCE_GIT_COMMIT" make hyperfed
 
 # build stage 2:
 FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base

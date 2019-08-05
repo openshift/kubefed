@@ -6,51 +6,127 @@
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: "federatedtypeconfigs.core.kubefed.k8s.io"
+# For namespace scoped deployments, create a unique cluster-scoped resource
+# using the namespace.
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+  name: validations.core.kubefed.io-{{ .Release.Namespace }}
+{{ else }}
+  name: validations.core.kubefed.io
+{{ end }}
 webhooks:
-- name: federatedtypeconfigs.core.kubefed.k8s.io
+- name: federatedtypeconfigs.core.kubefed.io
   clientConfig:
     service:
       namespace: {{ .Release.Namespace | quote }}
       name: kubefed-admission-webhook
-      path: /apis/admission.core.kubefed.k8s.io/v1beta1/federatedtypeconfigs
+      path: /apis/validation.core.kubefed.io/v1beta1/federatedtypeconfigs
     caBundle: {{ b64enc $ca.Cert | quote }}
   rules:
   - operations:
-    - "CREATE"
-    - "UPDATE"
+    - CREATE
+    - UPDATE
     apiGroups:
-    - "core.kubefed.k8s.io"
+    - core.kubefed.io
     apiVersions:
-    - "v1beta1"
+    - v1beta1
     resources:
-    - "federatedtypeconfigs"
-    - "federatedtypeconfigs/status"
+    - federatedtypeconfigs
+    - federatedtypeconfigs/status
   failurePolicy: Fail
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+# For namespace scoped deployments: filter admission webhook requests for
+# resources whose namespace matches the default namespace label applied by helm
+# upon creating the namespace. User must set this label manually if namespace
+# is created prior to installing chart with helm.
+# TODO(font): Use custom namespace label once helm adds support for it. See
+# https://github.com/helm/helm/issues/4178 for more details.
+  namespaceSelector:
+    matchLabels:
+      name: {{ .Release.Namespace }}
+{{ end }}
+- name: kubefedclusters.core.kubefed.io
+  clientConfig:
+    service:
+      namespace: {{ .Release.Namespace | quote }}
+      name: kubefed-admission-webhook
+      path: /apis/validation.core.kubefed.io/v1beta1/kubefedclusters
+    caBundle: {{ b64enc $ca.Cert | quote }}
+  rules:
+  - operations:
+    - CREATE
+    - UPDATE
+    apiGroups:
+    - core.kubefed.io
+    apiVersions:
+    - v1beta1
+    resources:
+    - kubefedclusters
+    - kubefedclusters/status
+  failurePolicy: Fail
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+# See comment above.
+  namespaceSelector:
+    matchLabels:
+      name: {{ .Release.Namespace }}
+{{ end }}
+- name: kubefedconfigs.core.kubefed.io
+  clientConfig:
+    service:
+      namespace: {{ .Release.Namespace | quote }}
+      name: kubefed-admission-webhook
+      path: /apis/validation.core.kubefed.io/v1beta1/kubefedconfigs
+    caBundle: {{ b64enc $ca.Cert | quote }}
+  rules:
+  - operations:
+    - CREATE
+    - UPDATE
+    apiGroups:
+    - core.kubefed.io
+    apiVersions:
+    - v1beta1
+    resources:
+    - kubefedconfigs
+  failurePolicy: Fail
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+# See comment above.
+  namespaceSelector:
+    matchLabels:
+      name: {{ .Release.Namespace }}
+{{ end }}
 ---
+# The same comments for ValidatingWebhookConfiguration apply here to
+# MutatingWebhookConfiguration.
 apiVersion: admissionregistration.k8s.io/v1beta1
-kind: ValidatingWebhookConfiguration
+kind: MutatingWebhookConfiguration
 metadata:
-  name: "kubefedclusters.core.kubefed.k8s.io"
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+  name: mutation.core.kubefed.io-{{ .Release.Namespace }}
+{{ else }}
+  name: mutation.core.kubefed.io
+{{ end }}
 webhooks:
-- name: kubefedclusters.core.kubefed.k8s.io
+- name: kubefedconfigs.core.kubefed.io
   clientConfig:
     service:
       namespace: {{ .Release.Namespace | quote }}
       name: kubefed-admission-webhook
-      path: /apis/admission.core.kubefed.k8s.io/v1beta1/kubefedclusters
+      path: /apis/mutation.core.kubefed.io/v1beta1/kubefedconfigs
     caBundle: {{ b64enc $ca.Cert | quote }}
   rules:
   - operations:
-    - "CREATE"
-    - "UPDATE"
+    - CREATE
     apiGroups:
-    - "core.kubefed.k8s.io"
+    - core.kubefed.io
     apiVersions:
-    - "v1beta1"
+    - v1beta1
     resources:
-    - "kubefedclusters"
+    - kubefedconfigs
   failurePolicy: Fail
+{{- if and .Values.global.scope (eq .Values.global.scope "Namespaced") }}
+  namespaceSelector:
+    matchLabels:
+      name: {{ .Release.Namespace }}
+{{ end }}
 ---
 apiVersion: v1
 kind: Secret
