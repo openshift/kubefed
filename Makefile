@@ -100,8 +100,9 @@ endef
 $(foreach cmd, $(COMMANDS), $(foreach os, $(OSES), $(eval $(call OS_template, $(cmd),$(os),$(notdir $(cmd))))))
 
 define CMD_template
-$(1): $(1)-$(HOST_OS)
-	ln -sf $(notdir $(1)-$(HOST_OS)) $(1)
+$(1): $(1)-$(HOST_PLATFORM)
+	ln -sf $(notdir $(1)-$(HOST_PLATFORM)) $(1)
+	ls -alt bin
 ALL_BINS := $(ALL_BINS) $(1)
 endef
 $(foreach cmd, $(COMMANDS), $(eval $(call CMD_template,$(cmd))))
