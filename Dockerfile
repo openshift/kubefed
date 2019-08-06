@@ -29,7 +29,12 @@ ENV USER_ID=1001
 
 # copy in binaries
 WORKDIR /root/
-COPY --from=builder /go/src/sigs.k8s.io/kubefed/bin/hyperfed-* /root/hyperfed
+# image builder is treating wild-carded source of the COPY command as a list
+# and therefore treating the target as a dir. this gets us to having a single file
+# called hyperfed in root.
+
+COPY --from=builder /go/src/sigs.k8s.io/kubefed/bin/hyperfed-* /root/
+RUN mv /root/hyperfed-* /root/hyperfed
 RUN ln -s hyperfed controller-manager && ln -s hyperfed kubefedctl &&  ln -s hyperfed webhook
 
 # user directive - this image does not require root
