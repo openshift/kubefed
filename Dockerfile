@@ -28,19 +28,26 @@ FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
 ENV USER_ID=1001
 
 # copy in binaries
-WORKDIR /root/
+RUN mkdir -p /hyperfed
+RUN groupadd -r hyperfed
+RUN useradd -g hyperfed -u $USER_ID hyperfed
+
+WORKDIR /hyperfed/
+
 # image builder is treating wild-carded source of the COPY command as a list
 # and therefore treating the target as a dir. this gets us to having a single file
-# called hyperfed in root.
+# called hyperfed in hyperfed directory.
 
-COPY --from=builder /go/src/sigs.k8s.io/kubefed/bin/hyperfed-* /root/
-RUN mv /root/hyperfed-* /root/hyperfed
+COPY --from=builder /go/src/sigs.k8s.io/kubefed/bin/hyperfed-* /hyperfed/
+RUN mv /hyperfed/hyperfed-* /hyperfed/hyperfed
 RUN ln -s hyperfed controller-manager && ln -s hyperfed kubefedctl &&  ln -s hyperfed webhook
 
-# user directive - this image does not require root
-USER ${USER_ID}
+RUN chown -R hyperfed:hyperfed /hyperfed
 
-ENTRYPOINT ["/root/controller-manager"]
+# user directive - this image does not require root
+USER hyperfed
+
+ENTRYPOINT ["/hyperfed/controller-manager"]
 
 # apply labels to final image
 LABEL io.k8s.display-name="OpenShift KubeFed" \
