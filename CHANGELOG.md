@@ -1,4 +1,38 @@
 # Unreleased
+-  [#1121](https://github.com/kubernetes-sigs/kubefed/pull/1121) Update
+   `kubefedctl federate` shorthand option for `--enable-type` to `-t` instead
+   of `-e` to avoid confusing error message when only one dash is accidentally
+   used e.g. `-enable-type`, resulting in a valid parsing of flags but
+   erroneous use of the option.
+
+# v0.1.0-rc6
+-  [#1099](https://github.com/kubernetes-sigs/kubefed/pull/1099)
+   Updates to propagation status are now only made in response to
+   propagation to member clusters or errors in propagation. Previously
+   propagation status was updated every time a federated resource was
+   reconciled which could result in unnecessary resource consumption.
+-  [#1098](https://github.com/kubernetes-sigs/kubefed/pull/1098)
+   Propagated version is now only updated when changed.
+-  [#1087](https://github.com/kubernetes-sigs/kubefed/issues/1087)
+   The ReplicaScheduling controller now correctly updates existing
+   overrides of `/spec/replicas`. Previously the controller was able
+   to create and remove overrides for the `replicas` field but would
+   fail to update them.
+-  [#1076](https://github.com/kubernetes-sigs/kubefed/pull/1076)
+   All `kubefedctl` commands now default `--host-cluster-context` to the
+   current context in log messages.
+-  [#1086](https://github.com/kubernetes-sigs/kubefed/pull/1086)
+   `kubefedctl federate` now removes all metadata fields except labels
+   from the template of federated resources created from a
+   non-federated resource. Previously `metadata.annotations` and
+   `metadata.finalizers` were not removed which could result in
+   propagation errors.
+-  [#1079](https://github.com/kubernetes-sigs/kubefed/issues/1079) The
+   spec field is now required in generated federated types. For types
+   generated previously, a check has been added so that a missing spec
+   field does not cause a nil pointer exception.
+
+# v0.1.0-rc5
 -  [#1058](https://github.com/kubernetes-sigs/kubefed/issues/1058)
    KubeFedConfig spec.scope is now immutable.
 -  [#1052](https://github.com/kubernetes-sigs/kubefed/pull/1052)

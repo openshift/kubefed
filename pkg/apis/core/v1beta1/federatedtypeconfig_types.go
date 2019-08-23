@@ -120,7 +120,7 @@ type FederatedTypeConfigStatus struct {
 //   clusters.
 //
 // +k8s:openapi-gen=true
-// +kubebuilder:resource:path=federatedtypeconfigs
+// +kubebuilder:resource:path=federatedtypeconfigs,shortName=ftc
 // +kubebuilder:subresource:status
 type FederatedTypeConfig struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -219,7 +219,9 @@ func (f *FederatedTypeConfig) GetStatusType() *metav1.APIResource {
 }
 
 func (f *FederatedTypeConfig) GetStatusEnabled() bool {
-	return f.Spec.StatusCollection != nil && *f.Spec.StatusCollection == StatusCollectionEnabled
+	return f.Spec.StatusCollection != nil &&
+		*f.Spec.StatusCollection == StatusCollectionEnabled &&
+		f.Name == "services"
 }
 
 // TODO(font): This method should be removed from the interface i.e. remove

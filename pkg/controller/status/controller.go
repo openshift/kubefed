@@ -95,6 +95,9 @@ func StartKubeFedStatusController(controllerConfig *util.ControllerConfig, stopC
 func newKubeFedStatusController(controllerConfig *util.ControllerConfig, typeConfig typeconfig.Interface) (*KubeFedStatusController, error) {
 	federatedAPIResource := typeConfig.GetFederatedType()
 	statusAPIResource := typeConfig.GetStatusType()
+	if statusAPIResource == nil {
+		return nil, errors.Errorf("Status collection is not supported for %q", federatedAPIResource.Kind)
+	}
 	userAgent := fmt.Sprintf("%s-controller", strings.ToLower(statusAPIResource.Kind))
 	client := genericclient.NewForConfigOrDieWithUserAgent(controllerConfig.KubeConfig, userAgent)
 
@@ -238,7 +241,9 @@ func (s *KubeFedStatusController) reconcile(qualifiedName util.QualifiedName) ut
 
 	klog.V(4).Infof("Starting to reconcile %v %v", statusKind, key)
 	startTime := time.Now()
-	defer klog.V(4).Infof("Finished reconciling %v %v (duration: %v)", statusKind, key, time.Since(startTime))
+	defer func() {
+		klog.V(4).Infof("Finished reconciling %v %v (duration: %v)", statusKind, key, time.Since(startTime))
+	}()
 
 	fedObject, err := s.objFromCache(s.federatedStore, federatedKind, key)
 	if err != nil {

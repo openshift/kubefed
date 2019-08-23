@@ -213,9 +213,9 @@ func updateOverridesMap(overridesMap util.OverridesMap, replicasMap map[string]i
 	// Add/update replicas override for clusters that are scheduled
 	for clusterName, replicas := range replicasMap {
 		replicasOverrideFound := false
-		for _, overrideItem := range overridesMap[clusterName] {
+		for idx, overrideItem := range overridesMap[clusterName] {
 			if overrideItem.Path == replicasPath {
-				overrideItem.Value = replicas
+				overridesMap[clusterName][idx].Value = replicas
 				replicasOverrideFound = true
 				break
 			}
@@ -249,7 +249,7 @@ func OverrideUpdateNeeded(overridesMap util.OverridesMap, result map[string]int6
 			}
 			value := int64(floatValue)
 			replicas, ok := result[clusterName]
-			if !ok || value != int64(replicas) {
+			if !ok || value != replicas {
 				return true
 			}
 			checkLen += 1

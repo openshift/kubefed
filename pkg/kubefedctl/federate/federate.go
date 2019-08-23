@@ -90,7 +90,7 @@ type federateResource struct {
 func (j *federateResource) Bind(flags *pflag.FlagSet) {
 	flags.StringVarP(&j.resourceNamespace, "namespace", "n", "", "The namespace of the resource to federate.")
 	flags.StringVarP(&j.output, "output", "o", "", "If provided, the resource that would be created in the API by the command is instead output to stdout in the provided format.  Valid format is ['yaml'].")
-	flags.BoolVarP(&j.enableType, "enable-type", "e", false, "If true, attempt to enable federation of the API type of the resource before creating the federated resource.")
+	flags.BoolVarP(&j.enableType, "enable-type", "t", false, "If true, attempt to enable federation of the API type of the resource before creating the federated resource.")
 	flags.BoolVarP(&j.federateContents, "contents", "c", false, "Applicable only to namespaces. If provided, the command will federate all resources within the namespace after federating the namespace.")
 	flags.StringVarP(&j.filename, "filename", "f", "", "If specified, the provided yaml file will be used as the input for target resources to federate. This mode will only emit federated resource yaml to standard output. Other flag options if provided will be ignored.")
 	flags.StringSliceVarP(&j.skipAPIResourceNames, "skip-api-resources", "s", []string{}, "Comma separated names of the api resources to skip when federating contents in a namespace. Name could be short name "+
@@ -361,8 +361,10 @@ func FederatedResourceFromTargetResource(typeConfig typeconfig.Interface, resour
 	fedAPIResource := typeConfig.GetFederatedType()
 	targetResource := resource.DeepCopy()
 
+	targetKind := typeConfig.GetTargetType().Kind
+
 	// Special handling is needed for some controller set fields.
-	switch typeConfig.GetTargetType().Kind {
+	switch targetKind {
 	case ctlutil.NamespaceKind:
 		{
 			unstructured.RemoveNestedField(targetResource.Object, "spec", "finalizers")
@@ -397,9 +399,22 @@ func FederatedResourceFromTargetResource(typeConfig typeconfig.Interface, resour
 	resourceNamespace := getNamespace(typeConfig, qualifiedName)
 	fedResource := &unstructured.Unstructured{}
 	SetBasicMetaFields(fedResource, fedAPIResource, qualifiedName.Name, resourceNamespace, "")
-	RemoveUnwantedFields(targetResource)
 
-	err := unstructured.SetNestedField(fedResource.Object, targetResource.Object, ctlutil.SpecField, ctlutil.TemplateField)
+	// Warn if annotations are present in case the intention is to
+	// define annotations in the template of the federated resource.
+	annotations, _, err := unstructured.NestedMap(targetResource.Object, "metadata", "annotations")
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to retrieve metadata.annotations")
+	}
+	if len(annotations) > 0 {
+		klog.Warningf("Annotations defined for %s %q will not appear in the template of the federated resource: %v", targetKind, qualifiedName, annotations)
+	}
+
+	if err := RemoveUnwantedFields(targetResource); err != nil {
+		return nil, err
+	}
+
+	err = unstructured.SetNestedField(fedResource.Object, targetResource.Object, ctlutil.SpecField, ctlutil.TemplateField)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +442,7 @@ func CreateResources(cmdOut io.Writer, hostConfig *rest.Config, artifactsList []
 			if err != nil {
 				return err
 			}
-			err = enable.CreateResources(cmdOut, hostConfig, typeResources, namespace)
+			err = enable.CreateResources(cmdOut, hostConfig, typeResources, namespace, dryRun)
 			if err != nil {
 				return err
 			}
