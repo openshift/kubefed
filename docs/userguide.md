@@ -3,7 +3,6 @@
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
 - [User Guide](#user-guide)
-  - [kubefedctl CLI](#kubefedctl-cli)
   - [Deployment Image](#deployment-image)
   - [Create Clusters](#create-clusters)
   - [Helm Chart Deployment](#helm-chart-deployment)
@@ -64,23 +63,6 @@ Please refer to [KubeFed Concepts](./concepts.md) first before you go through th
 This user guide contains concepts and procedures to help you get started with KubeFed.
 
 For information about installing KubeFed, see the [installation documentation](./installation.md).
-
-## kubefedctl CLI
-
-`kubefedctl` is the KubeFed command line utility. You can download
-the latest binary from the [release page](https://github.com/kubernetes-sigs/kubefed/releases).
-
-```bash
-VERSION=<latest-version, e.g. 0.1.0-rc3>
-OS=<darwin/linux>
-ARCH=amd64
-curl -LO https://github.com/kubernetes-sigs/kubefed/releases/download/v${VERSION}/kubefedctl-${VERSION}-${OS}-${ARCH}.tgz
-tar -zxvf kubefedctl-*.tgz
-chmod u+x kubefedctl
-sudo mv kubefedctl /usr/local/bin/ # make sure the location is in the PATH
-```
-
-**NOTE:** `kubefedctl` is built for Linux and OSX only in the release package.
 
 ## Deployment Image
 
@@ -497,16 +479,16 @@ To prevent removal of these managed resources, add `kubefed.io/orphan:
 true` as an annotation to the federated resource prior to deletion, as follows.
 
 You can do it by
-```bash 
+```bash
 kubefedctl orphaning-deletion enable <federated type> <name>
 ```
 You can also check the current `orphaning-deletion` status by:
- ```bash 
+ ```bash
  kubefedctl orphaning-deletion status <federated type> <name>
  ```
-And finally, if you want to return to the default deletion behavior, you can disable 
+And finally, if you want to return to the default deletion behavior, you can disable
 the `orphaning-deletion` by:
-```bash 
+```bash
  kubefedctl orphaning-deletion disable <federated type> <name>
  ```
 
@@ -771,6 +753,19 @@ spec:
 For this case, `spec.placement.clusterSelector` will be ignored as
 `spec.placement.clusters` is provided. This ensures that the results of runtime
 scheduling have priority over manual definition of a cluster selector.
+
+`spec.placement.clusterSelector` will also be ignored if
+`spec.placement.clusters` is provided but empty. In the following example, no
+clusters will be selected:
+
+```yaml
+spec:
+  placement:
+    clusters: []
+    clusterSelector:
+      matchLabels:
+        foo: bar
+```
 
 ### `spec.placement.clusters` is not provided, `spec.placement.clusterSelector` is provided but empty
 
